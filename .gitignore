@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Generated outputs — the pipeline recreates these; don't ship stale runs
+outputs/*.png
+outputs/*.md
+outputs/*.json
+
+.DS_Store
