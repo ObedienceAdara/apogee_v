@@ -1,0 +1,33 @@
+mission_name: "Apogee Demo Mission — Lagos Test Range"
+
+site:
+  name: "Lagos Test Range"
+  latitude: 6.5244
+  longitude: 3.3792
+  elevation_m: 41.0
+  timezone: "UTC"
+
+launch_datetime_utc: "2026-09-15T09:00:00"
+
+surface_wind_m_s: 4.5
+surface_wind_heading_deg: 270.0
+
+target_apogee_m: 2200.0
+apogee_tolerance_pct: 6.0
+
+airframe:
+  radius_m: 0.0515
+  dry_mass_kg: 3.6
+  dry_inertia_kg_m2: [1.0, 1.0, 0.012]
+  center_of_dry_mass_m: 1.05
+  rail_length_m: 5.2
+  certification_level_max_impulse_n_s: 5120.0
+
+motor_library_dir: "config/motors"
+
+n_dispersion_runs: 120
+
+max_safe_impact_velocity_m_s: 7.0
+stability_safety_threshold_cal: 1.0
+
+flight_log_csv: "data/sample_flight_log.csv"
