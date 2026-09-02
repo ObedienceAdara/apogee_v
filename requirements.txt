@@ -1,0 +1,11 @@
+# Apogee — Rocket Mission Certification Platform
+# Tested with Python 3.12.
+
+rocketpy>=1.9,<2.0
+astropy>=6.0
+pydantic>=2.6
+PyYAML>=6.0
+matplotlib>=3.8
+scipy>=1.11
+numpy>=1.26
+pytest>=8.0        # dev/test only — not required to run the pipeline
