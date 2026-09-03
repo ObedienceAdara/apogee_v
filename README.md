@@ -1,270 +1,536 @@
-# Apogee — A Full-Stack Rocket Mission Certification Platform
+# Apogee — Rocket Mission Simulation & Verification
 
-**Apogee** is an end-to-end rocket flight simulation and certification pipeline
-built on [RocketPy](https://github.com/RocketPy-Team/RocketPy) and
-[Astropy](https://www.astropy.org/). It doesn't just simulate a single flight —
-it runs a six-stage mission design and verification workflow, the same shape
-of workflow a real high-power rocketry team or launch-vehicle company runs
-before signing off on a flight, and outputs a single **Flight Readiness
-Report (FRR)**: the actual document format required for range-safety review
-at events like IREC / Spaceport America Cup, and the kind of artifact a
-review board at an aerospace company (e.g. an industrial placement like
-Proforce Air Systems) would expect to see.
+> **A systems-engineering pipeline for rocket mission design, flight simulation, uncertainty analysis, recovery trade studies, and flight-readiness reporting.**
 
-This is a systems-engineering project, not five disconnected scripts. Motor
-choice affects stability, stability constrains the airframe, dispersion
-depends on both, and recovery optimization feeds back into a confirmation
-dispersion run. Those dependencies are wired together in `apogee/pipeline.py`
-as real feedback loops, not just five function calls in a row.
+Apogee combines **RocketPy**, **Astropy**, **NumPy/SciPy**, and **Pydantic** into one reproducible workflow rather than a collection of disconnected scripts.
+
+The pipeline evaluates a configurable rocket mission through environment checks, motor selection, Mach-dependent stability analysis, six-degree-of-freedom Monte Carlo dispersion, recovery optimization, optional flight-log comparison, and automated report generation.
+
+**Important:** this repository is a simulation and analysis project. It is **not** a certified flight simulator, launch authorization system, or substitute for a real range-safety review. The current demonstration uses synthetic motor and flight-log data, clearly labeled below.
 
 ---
 
-## What it actually does
+## System Architecture
 
-```
-Stage 0 — Environment & Launch Window          (Astropy + RocketPy)
-        |  sun elevation, twilight check, altitude wind profile, go/no-go
-        v
-Stage 1 — Motor Selection Optimizer            (RocketPy)
-        |  sweeps a motor library, ranks by apogee-error + cost, checks cert level
-        v
-Stage 4 — Stability Margin Sweep vs Mach        (RocketPy)
-        |  flies each fin candidate, tracks CP/CG margin through the transonic band
-        |  feeds back: if nothing is stable, that's a blocking issue, not a crash
-        v
-Stage 2 — Six-DOF Monte Carlo Dispersion        (RocketPy, parallelized)
-        |  N randomized flights -> 95% confidence landing ellipse
-        v
-Stage 3 — Recovery System Optimizer             (RocketPy)
-        |  Pareto front: drift vs. impact velocity trade-off
-        v
-Stage 2 (again) — confirms the optimized recovery config actually
-        |          shrinks the dispersion footprint under real wind uncertainty
-        v
-Stage 5 — Real Flight Validation (V&V)          (optional, if a flight log exists)
-        |  sim-vs-actual residuals + likely-cause diagnosis
-        v
-Flight Readiness Report  (Markdown + JSON + 3 plots)
+```text
+                         MISSION CONFIG
+                              │
+                              ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 0 — ENVIRONMENT & LAUNCH WINDOW                       │
+│  Astropy solar geometry + atmospheric/wind model             │
+│  Output: shared environment + Go/No-Go scorecard             │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 1 — MOTOR SELECTION                                   │
+│  Sweep motor library → apogee error + cost + certification   │
+│  Output: ranked motor shortlist                              │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 4 — STABILITY vs MACH                                 │
+│  Fin sweep → CP/CG / static-margin history through flight    │
+│  Output: selected fin geometry + stability result             │
+│                                                              │
+│  BLOCKING CONDITION: no candidate above safety threshold     │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 2 — MONTE CARLO DISPERSION                            │
+│  Full 6-DOF flights with uncertainty in:                     │
+│  wind · thrust · mass · CG · rail angle                      │
+│  Output: landing distribution + 95% confidence ellipse       │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 3 — RECOVERY TRADE STUDY                              │
+│  Sweep main/drogue configurations                             │
+│  Objectives: minimize drift + minimize impact velocity       │
+│  Output: Pareto front + recommended configuration             │
+└──────────────────────────────┬───────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 2 — CONFIRMATION RUN                                  │
+│  Re-run the optimized recovery configuration through the     │
+│  full Monte Carlo analysis to verify the footprint change     │
+│  under uncertainty                                           │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  STAGE 5 — FLIGHT-LOG COMPARISON (OPTIONAL)                  │
+│  Simulated vs logged apogee / velocity / descent rate        │
+│  Output: signed residuals + likely error sources              │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+                    FLIGHT READINESS REPORT
+                  Markdown + JSON + 3 plots
 ```
 
-Every stage hands off to the next through a typed Pydantic model
-(`apogee/schemas.py`) — Stage 1's output schema **is** Stage 2's input
-schema, enforced at runtime. If a stage produces something malformed, it
-fails loudly at that boundary instead of silently corrupting a Monte Carlo
-run three stages downstream.
+The important design choice is that these stages **share typed data contracts** rather than passing unstructured dictionaries. Pydantic models in `apogee/schemas.py` define the interfaces between mission stages and make malformed hand-offs fail explicitly.
 
 ---
 
-## Repository structure
+## What the Pipeline Models
 
+### Environment
+
+The launch-condition stage evaluates:
+
+- solar elevation / civil-twilight state
+- altitude-dependent wind profile
+- maximum modeled ground-band wind
+- configurable launch-condition limits
+
+The current demonstration uses a deterministic power-law wind profile rather than a live forecast feed.
+
+### Motor Selection
+
+The pipeline discovers RASP-format `.eng` files, parses their thrust curves, builds RocketPy motor models, and evaluates candidates against a target apogee.
+
+Candidates are ranked using mission-relevant constraints rather than simply selecting the most powerful motor.
+
+### Stability
+
+For each candidate fin set, the pipeline runs an actual RocketPy flight and samples static margin against Mach through the modeled boost/coast segment.
+
+This means the reported margin can reflect:
+
+- propellant burn and CG migration
+- Mach-dependent aerodynamic behavior
+- the actual simulated flight history
+
+The implementation explicitly flags the transonic region as a **model-confidence boundary** for the semi-empirical aerodynamic treatment.
+
+### Dispersion
+
+The core uncertainty analysis runs independent six-degree-of-freedom flights while perturbing:
+
+- wind speed
+- wind direction
+- motor thrust scale
+- dry mass
+- center-of-gravity position
+- launch inclination
+- launch heading
+
+The resulting landing points are summarized with a **95% confidence ellipse**.
+
+### Recovery Optimization
+
+Recovery is treated as a multi-objective problem:
+
+```text
+        Horizontal drift  ← minimize
+                  ↕
+        Impact velocity   ← minimize
 ```
-apogee/
-├── README.md                        <- you are here
+
+Instead of inventing one weighted score, the pipeline computes the **Pareto-optimal set** and then selects a configuration subject to the configured impact-velocity limit.
+
+The chosen configuration is subsequently pushed back through Stage 2 for a full uncertainty-aware confirmation run.
+
+### Flight-Log Comparison
+
+If a flight log is configured, Stage 5 compares:
+
+- apogee
+- maximum velocity
+- descent rate
+
+and reports signed percentage error plus possible sources of discrepancy.
+
+The current repository does **not** contain a real hardware flight.
+
+---
+
+## Technical Design
+
+### Typed stage interfaces
+
+Every pipeline stage communicates through Pydantic models in `apogee/schemas.py`.
+
+Examples include:
+
+```text
+MissionConfig
+     ↓
+EnvironmentReport
+     ↓
+MotorSelectionResult
+     ↓
+StabilityResult
+     ↓
+DispersionAnalysisResult
+     ↓
+RecoveryOptimizationResult
+     ↓
+ValidationResult
+     ↓
+FlightReadinessReport
+```
+
+This keeps the pipeline inspectable and makes stage boundaries explicit.
+
+### Single rocket-construction path
+
+`apogee/utils/rocket_builder.py` centralizes rocket and motor construction so geometry and common assumptions are not duplicated across stages.
+
+### Parallel Monte Carlo
+
+Stage 2 uses `ProcessPoolExecutor` because each dispersion flight is independent.
+
+Workers rebuild RocketPy objects from primitive inputs instead of attempting to pickle complex RocketPy objects across processes.
+
+### Deterministic experiment setup
+
+Stage 2 pre-samples uncertainty inputs from a seeded random generator so the experiment can be repeated with the same configuration and seed.
+
+---
+
+## Demo Results
+
+The current v1.0 demonstration was run with the configured synthetic mission.
+
+| Quantity | Recorded result |
+|---|---:|
+| Target apogee | **2,200 m** |
+| Selected motor | **K740-Synth** |
+| Apogee error | **0.12%** |
+| Minimum static margin | **1.96 cal** |
+| Monte Carlo runs | **120** |
+| Tests | **19** |
+| Landing dispersion | **919 m, 95% confidence** |
+
+These numbers describe the **software's current synthetic demonstration**, not a real launch campaign.
+
+The generated report contains:
+
+- motor-selection shortlist
+- stability-margin analysis
+- 6-DOF dispersion statistics
+- landing ellipse
+- recovery trade-off
+- optional V&V comparison
+
+Run the pipeline yourself to regenerate the artifacts.
+
+---
+
+## Repository Structure
+
+```text
+apogee_v/
+├── README.md
 ├── requirements.txt
-├── config/
-│   ├── mission_config.yaml          <- the ONE file you edit for a new mission
-│   └── motors/                      <- .eng thrust-curve library (synthetic demo set)
-│       ├── H128-Synth.eng ... K740-Synth.eng
-│       └── motor_costs.csv
-├── data/
-│   └── sample_flight_log.csv        <- synthetic demo "real flight" log (see below)
-├── apogee/                          <- the actual package
-│   ├── schemas.py                   <- Pydantic data contracts between every stage
-│   ├── stage0_environment.py        <- Astropy sun geometry + RocketPy Environment
-│   ├── stage1_motor_selector.py     <- motor library sweep + ranking
-│   ├── stage2_dispersion.py         <- parallelized 6-DOF Monte Carlo
-│   ├── stage3_recovery.py           <- recovery Pareto-front optimizer
-│   ├── stage4_stability.py          <- fin sweep + Mach-dependent static margin
-│   ├── stage5_validation.py         <- sim-vs-real V&V comparison
-│   ├── pipeline.py                  <- orchestrator (the feedback loops live here)
-│   ├── report.py                    <- renders the Markdown FRR + plots
+├── LICENSE
+│
+├── apogee/
+│   ├── schemas.py
+│   ├── pipeline.py
+│   ├── report.py
+│   ├── stage0_environment.py
+│   ├── stage1_motor_selector.py
+│   ├── stage2_dispersion.py
+│   ├── stage3_recovery.py
+│   ├── stage4_stability.py
+│   ├── stage5_validation.py
 │   └── utils/
-│       ├── motor_parser.py          <- standalone RASP .eng file parser
-│       └── rocket_builder.py        <- single source of truth for rocket/motor geometry
+│       ├── motor_parser.py
+│       └── rocket_builder.py
+│
+├── config/
+│   ├── mission_config.yaml
+│   └── motors/
+│       ├── *.eng
+│       └── motor_costs.csv
+│
+├── data/
+│   └── sample_flight_log.csv
+│
 ├── scripts/
-│   ├── run_pipeline.py              <- CLI entry point
-│   ├── generate_synthetic_motors.py <- builds the demo motor library
-│   └── generate_sample_flight_log.py<- builds the demo Stage-5 "real" flight log
-├── tests/
-│   ├── test_motor_parser.py
-│   ├── test_stage3_recovery.py
-│   └── test_stage4_stability.py
-└── outputs/                         <- pipeline writes the FRR + plots here
+│   ├── run_pipeline.py
+│   ├── generate_synthetic_motors.py
+│   └── generate_sample_flight_log.py
+│
+└── tests/
+    ├── test_motor_parser.py
+    ├── test_stage3_recovery.py
+    └── test_stage4_stability.py
 ```
+
+Generated artifacts are written to `outputs/` when the pipeline runs.
 
 ---
 
 ## Quickstart
 
+### 1. Install
+
 ```bash
 python3 -m pip install -r requirements.txt
-
-# (only needed once — both demo data sets are already committed, but this
-#  is how you'd regenerate them)
-python3 scripts/generate_synthetic_motors.py
-python3 scripts/generate_sample_flight_log.py
-
-# full run (uses n_dispersion_runs from mission_config.yaml — default 120)
-python3 scripts/run_pipeline.py
-
-# fast smoke test (20 Monte Carlo runs per stage, ~30-60s)
-python3 scripts/run_pipeline.py --quick
-
-# run the test suite
-python3 -m pytest tests/ -v
 ```
 
-Output lands in `outputs/`:
-- `flight_readiness_report.md` — the human-readable FRR
-- `flight_readiness_report.json` — the full machine-readable result (every
-  Pydantic model in the pipeline, serialized)
-- `dispersion_ellipse.png`, `stability_margin.png`, `recovery_pareto.png`
-
----
-
-## Why the motor library and flight log are synthetic
-
-RocketPy needs real `.eng` thrust-curve files to simulate a motor, and a real
-"actual flight" record to validate against — but real manufacturer `.eng`
-files are distributed via [thrustcurve.org](https://www.thrustcurve.org)
-(not vendorable into a repo), and this deliverable has no associated
-hardware launch (it's a software project, not a build log).
-
-So both are generated, clearly labeled, and easy to replace:
-
-- **Real motors:** download `.eng` files for your actual motors from
-  thrustcurve.org and drop them into `config/motors/` — the parser in
-  `apogee/utils/motor_parser.py` doesn't care where the file came from, only
-  that it's valid RASP format. Nothing else in the pipeline changes.
-- **Real flight data:** replace `data/sample_flight_log.csv` with your own
-  altimeter/GPS logger export (any logger works — just match the 4 columns:
-  `source,apogee_m,max_velocity_m_s,descent_rate_m_s,flight_time_s`).
-  `apogee/stage5_validation.py` doesn't care whether the data is real.
-- **Real weather:** `stage0_environment.py` currently builds a synthetic
-  power-law wind-shear profile (documented in the module docstring) because
-  this sandbox has no outbound internet access to a forecast feed. On a
-  machine with internet access, swap `build_environment()`'s
-  `set_atmospheric_model(type="custom_atmosphere", ...)` call for
-  `type="Forecast"` or `type="Reanalysis"` — RocketPy supports both natively
-  against GFS/NOAA data; see the RocketPy docs for the exact source string.
-
----
-
-## Engineering decisions worth knowing about
-
-**Grain geometry is estimated, not given.** The synthetic motor library only
-specifies total impulse, burn time, propellant mass and total mass (exactly
-what a real manufacturer's public spec sheet gives you) — not internal grain
-geometry, which even real `.eng` files don't include. `rocket_builder.py`
-back-solves a single-segment BATES-style grain from the known propellant
-mass and a typical APCP density (1750 kg/m³) so RocketPy can model mass
-depletion / CG shift during burn. This is a standard estimation technique
-when exact grain design isn't available — it's called out explicitly in the
-module docstring rather than silently baked in.
-
-**The transonic "dip" isn't forced.** Stage 4 doesn't assume a margin dip
-exists in the transonic band — it measures whatever the model actually
-produces and reports it honestly. In this demo configuration, static margin
-actually *increases* through the compressible regime (from ~1.96 cal to
-~2.47 cal) as fin/nose lift-curve slopes diverge with Mach, then **plateaus**
-right around M0.8 — which is the semi-empirical Barrowman/Prandtl-Glauert
-correction hitting the edge of where it's formally valid, not a real
-aerodynamic phenomenon. The stability module flags this explicitly:
-above ~M0.8-1.2, RocketPy's (and OpenRocket's) predictions should be treated
-as indicative only, and a real flight-critical margin decision near Mach 1
-needs CFD or wind-tunnel cross-validation. If you have access to ANSYS
-Fluent or similar, exporting the flagged geometry and running 1-2 transonic
-cases is the natural next step — and a legitimate comparison study in its
-own right (semi-empirical vs. CFD).
-
-**Recovery optimization uses two different fidelities on purpose.** Stage 3
-evaluates ~24 recovery configurations with single nominal (no wind
-perturbation) flights, because a full Monte Carlo per candidate would be too
-slow for an interactive trade study. The *recommended* configuration is
-then re-run through the full Stage 2 Monte Carlo to confirm the footprint
-actually shrinks once wind uncertainty is back in the picture — that
-confirmation number (not Stage 3's internal estimate) is what the FRR
-reports as the real footprint change. Comparing Stage 3's nominal-basis
-"footprint_reduction_pct" against Stage 2's uncertainty-basis ellipse
-directly would be an apples-to-oranges bug — an earlier version of this
-pipeline actually made that mistake (a nonsensical -66% "reduction"); the
-fix is why `run_stage3` compares every candidate, including the baseline,
-on the exact same simulation basis.
-
-**Low main-deployment altitudes will look attractive — sanity-check them.**
-The Stage 3 sweep may recommend a low main-deployment altitude (e.g. 150m
-AGL) because less time under the slow, wind-exposed main chute means less
-drift. That's real physics. But a real mission should also enforce a hard
-minimum deployment floor for canopy inflation time and a backup-deployment
-timeline margin — this pipeline doesn't currently encode that as a
-constraint, only as a note here. Add a `min_main_deploy_altitude_m` floor to
-`MAIN_DEPLOY_ALTITUDES_M` in `stage3_recovery.py` before trusting a
-recommendation on a real vehicle.
-
-**Single motor/fin combination per run, by design.** The pipeline picks one
-motor (Stage 1) and then sweeps fins for *that* motor (Stage 4), rather than
-a full motor x fin cross-product. A different motor changes the Mach history
-the rocket flies through, which can change the stability answer — so this is
-a simplification made for pipeline runtime, not a claim that motor and fin
-choice are independent. Widen `FIN_CANDIDATES` in `pipeline.py` and re-run
-per motor shortlist entry if you want the full cross-product.
-
----
-
-## Performance notes
-
-- Stage 2's Monte Carlo is parallelized with `ProcessPoolExecutor`
-  (`apogee/stage2_dispersion.py`) — each worker rebuilds its own
-  `Environment`/`Motor`/`Rocket` from primitive parameters rather than
-  pickling RocketPy objects across the process boundary, which is what
-  makes the parallelization actually work cleanly.
-- On this development machine (single core), one full 6-DOF flight with
-  parachutes to landing takes ~0.7-1s, so 120 runs takes ~1.5-2 minutes.
-  On a multi-core machine, `--workers N` will scale close to linearly —
-  widen `n_dispersion_runs` in `mission_config.yaml` to 300-500 for a
-  statistically tighter dispersion ellipse once you have the cores for it.
-- `--quick` overrides `n_dispersion_runs` to 20 for both Monte Carlo stages,
-  meant for iterating on config/geometry changes, not for a real FRR.
-
----
-
-## Extending this
-
-- **CFD cross-check:** export the Stage 4 flagged transonic geometry and
-  run it through ANSYS Fluent (or OpenFOAM) at 2-3 Mach points; compare
-  against RocketPy's Barrowman-based CP prediction. This is the single
-  highest-value extension for anyone with a CFD background.
-- **Real weather feed:** see "Real weather" above.
-- **PDF export:** the FRR is Markdown by design (easy to version-control,
-  diff, and paste into other tools) — pipe `outputs/flight_readiness_report.md`
-  through `pandoc -o report.pdf` for a formatted PDF if a physical document
-  is needed for a review board.
-- **Multi-motor x multi-fin cross-product:** see "Single motor/fin
-  combination" above.
-- **Unified telemetry ingestion:** if you fly a real rocket, wire a real
-  logger's raw output directly into `stage5_validation.load_flight_log()`
-  instead of hand-editing the CSV.
-
----
-
-## Testing
+### 2. Run the test suite
 
 ```bash
 python3 -m pytest tests/ -v
 ```
 
-19 unit tests cover the `.eng` parser (header parsing, trapezoidal impulse
-integration, impulse-class classification, malformed-file handling), the
-Stage 3 Pareto-front computation (domination logic, sort order, edge cases),
-and the Stage 4 fin-selection rule (smallest-stable-wins, all-unstable
-fallback). These are fast (no RocketPy flights) and run in under 5 seconds.
-`test_motor_parser.py::test_real_synthetic_motor_library_parses` is a light
-integration check against the actual generated `config/motors/` library and
-skips gracefully if that directory hasn't been generated yet.
+Expected unit-test count for the current release:
+
+```text
+19 passed
+```
+
+### 3. Run the full pipeline
+
+```bash
+python3 scripts/run_pipeline.py
+```
+
+The default mission configuration uses **120 Monte Carlo runs**.
+
+### 4. Run a quick smoke test
+
+```bash
+python3 scripts/run_pipeline.py --quick
+```
+
+The quick mode reduces the Monte Carlo count for iteration and debugging. It is not intended to replace the full analysis run.
+
+### 5. Inspect generated artifacts
+
+```text
+outputs/
+├── flight_readiness_report.md
+├── flight_readiness_report.json
+├── dispersion_ellipse.png
+├── stability_margin.png
+└── recovery_pareto.png
+```
 
 ---
 
-*Built for demonstrating a real aerospace mission-design workflow — not a
-substitute for a certified flight simulator or a real safety review. Every
-synthetic dataset in this repo is labeled as such; replace it with real data
-before making a real flight decision from this tool's output.*
+## Synthetic Data & Modeling Boundaries
+
+This repository is deliberately explicit about what is simulated, estimated, and not yet physically validated.
+
+### Synthetic motor library
+
+The included `.eng` files are generated demonstration thrust curves.
+
+They are **not certified manufacturer motor data**.
+
+The pipeline accepts real RASP-format motor files without requiring changes to the parser.
+
+### Synthetic flight log
+
+`data/sample_flight_log.csv` is a clearly labeled synthetic log used to demonstrate the Stage 5 comparison pipeline.
+
+There is no hardware launch associated with this repository.
+
+### Weather
+
+The current environment model uses a deterministic power-law wind-shear approximation.
+
+The code provides a clear swap point for a real forecast/reanalysis source on a machine with an appropriate data feed.
+
+### Aerodynamic model
+
+The stability analysis uses semi-empirical aerodynamic methods available through RocketPy. The repository explicitly treats the transonic region as a modeling-confidence boundary.
+
+For a flight-critical model, this should be independently cross-checked with higher-fidelity aerodynamic data such as CFD or wind-tunnel measurements.
+
+---
+
+## Engineering Decisions
+
+### 1. Estimated grain geometry
+
+The demo motor inputs provide propellant/total mass and thrust curves, but not internal grain geometry.
+
+`rocket_builder.py` therefore estimates a single-segment BATES-style geometry so RocketPy can model propellant depletion and CG movement.
+
+The assumption is documented rather than hidden.
+
+### 2. Stability is evaluated across the flight
+
+The system does not rely on one static low-speed stability calculation.
+
+It samples static margin throughout the modeled flight, allowing CG and Mach effects to appear in the result.
+
+### 3. Transonic results are not presented as certification-grade
+
+The repository deliberately avoids treating the Barrowman/Prandtl–Glauert region beyond its useful range as authoritative.
+
+The output flags the modeling boundary instead of silently presenting the numbers as fact.
+
+### 4. Recovery uses two simulation fidelities
+
+The recovery sweep is deliberately inexpensive so many configurations can be compared.
+
+The selected configuration is then evaluated again through the full Monte Carlo dispersion model.
+
+This prevents the optimizer from being judged on a different simulation basis from the final uncertainty analysis.
+
+### 5. Motor and fin coupling is explicit
+
+The current pipeline selects a motor first and evaluates fin candidates for that motor.
+
+A complete motor × fin cross-product is intentionally left as a future extension because motor choice changes the Mach history and therefore can change the stability result.
+
+---
+
+## Verification vs. Validation
+
+A central distinction in this project is:
+
+> **Verification asks whether the software implements its intended model correctly. Validation asks whether the model represents the physical system accurately enough for its intended use.**
+
+The current repository contains automated verification tests and a framework for importing flight data for validation.
+
+It does **not** claim physical validation of a real vehicle.
+
+That distinction is intentional.
+
+---
+
+## Test Coverage
+
+The current test suite contains **19 unit tests** covering:
+
+### RASP motor parser
+
+- header parsing
+- thrust-point parsing
+- dry-mass calculation
+- burn-time calculation
+- trapezoidal impulse integration
+- impulse-class classification
+- malformed-file handling
+- motor-library discovery
+
+### Recovery optimizer
+
+- Pareto dominance
+- non-dominated trade-offs
+- sorting
+- Pareto flags
+
+### Stability selection
+
+- fin-area calculation
+- smallest-stable-fin selection
+- unstable-candidate exclusion
+- all-unstable fallback behavior
+
+The current tests primarily exercise deterministic logic without running full RocketPy flights, keeping the suite fast.
+
+---
+
+## Development Lessons
+
+A useful part of this project was discovering that the engineering work was not simply writing the physics pipeline.
+
+Two examples:
+
+### Recovery-footprint comparison
+
+An earlier implementation produced an apparently nonsensical negative footprint reduction because two different simulation bases were being compared.
+
+The fix was to compare like-for-like configurations and then confirm the final result through the full Monte Carlo run.
+
+### RocketPy API assumption
+
+A flight-reporting implementation initially assumed an attribute name that did not exist in the RocketPy API.
+
+The error was caught during execution and corrected by checking the actual interface rather than guessing.
+
+These are small examples, but they capture the intended workflow:
+
+```text
+Implement
+   ↓
+Run
+   ↓
+Observe failure
+   ↓
+Diagnose
+   ↓
+Fix
+   ↓
+Test
+   ↓
+Record
+```
+
+---
+
+## Roadmap
+
+### Near term
+
+- real motor thrust-curve inputs
+- real weather/reanalysis feed
+- larger motor × fin trade space
+- explicit minimum main-deployment constraint
+- stronger end-to-end integration testing
+- richer generated plots and raw result exports
+
+### Aerodynamic fidelity
+
+- export geometry for CFD comparison
+- compare semi-empirical stability predictions against CFD around transonic conditions
+- incorporate higher-fidelity aerodynamic databases where available
+
+### Flight-data validation
+
+- ingest real altimeter/GPS telemetry
+- compare complete simulated and measured trajectories
+- quantify residuals and model bias
+- use measured data to calibrate uncertain model parameters
+
+### Autonomy
+
+The long-term direction is to expose the simulation as an environment for:
+
+- trim and linearization
+- classical guidance/control
+- reinforcement-learning controllers
+- disturbance rejection
+- trajectory optimization
+- autonomous flight experiments
+
+That is the bridge from **mission analysis** to **aerospace autonomous-systems research**.
+
+---
+
+## Why this project exists
+
+The goal is not to claim a certified rocket simulation.
+
+The goal is to build a transparent computational engineering workflow in which:
+
+**assumptions are visible,**
+
+**uncertainty is modeled,**
+
+**trade-offs are explicit,**
+
+**results are reproducible,**
+
+**failures are documented,**
+
+and **validation boundaries are not hidden.**
+
+---
+
+## License
+
+MIT
+
+---
+
+*Apogee is an educational/research software project for demonstrating aerospace systems engineering, simulation, uncertainty analysis, and verification workflows. Do not use its current outputs as a substitute for professional engineering review, certified simulation tools, range-safety analysis, or flight authorization.*
