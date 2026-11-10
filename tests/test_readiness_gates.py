@@ -60,7 +60,7 @@ def test_baseline_and_confirmation_convergence_are_independent_gates():
 
 def test_synthetic_or_missing_physical_validation_blocks_readiness():
     issues = _evaluate(validation_is_physical=False, validation_within_tolerance=None)
-    assert any("non-synthetic physical flight-data validation" in issue for issue in issues)
+    assert any("non-synthetic, configuration-matched physical flight-data validation" in issue for issue in issues)
 
 
 def test_out_of_tolerance_physical_validation_blocks_readiness():
