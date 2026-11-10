@@ -204,6 +204,7 @@ class RecoveryOptimizationResult(BaseModel):
     pareto_front: list[RecoveryCandidate]
     recommended: RecoveryCandidate
     footprint_reduction_pct: float
+    confirmed_footprint_reduction_pct: Optional[float] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +214,7 @@ class RecoveryOptimizationResult(BaseModel):
 class FlightLogRecord(BaseModel):
     source: str = Field(..., description="e.g. 'synthetic_demo' or a real logger filename")
     is_synthetic: bool = False
+    configuration_verified: bool = False
     apogee_m: float = Field(..., gt=0)
     max_velocity_m_s: float = Field(..., gt=0)
     descent_rate_m_s: float = Field(..., gt=0)
@@ -249,6 +251,7 @@ class MissionConfig(BaseModel):
     stability_safety_threshold_cal: float = 1.0
     flight_log_csv: Optional[str] = None
     flight_log_is_synthetic: bool = False
+    flight_log_configuration_verified: bool = False
 
     @field_validator("apogee_tolerance_pct")
     @classmethod
