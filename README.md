@@ -408,7 +408,7 @@ The generated report deliberately separates **engineering gate status** from **l
 
 The demo configuration intentionally marks its included log as synthetic and its configuration match as unverified. It also contains a historical launch date. It must therefore produce a **NO-GO** engineering status. This is expected: the demo is not evidence of launch readiness.
 
-The Stage 5 comparison uses a separate nominal RocketPy flight with the selected motor, fin geometry, and recovery settings. It does not infer velocity from Mach using a fixed speed-of-sound value or compare a Monte Carlo mean against a different baseline configuration.
+When a log is supplied, Stage 5 computes a separate nominal RocketPy reference flight using the selected motor, fin geometry, and recovery settings. It uses RocketPy's velocity result rather than inferring velocity from Mach with a fixed speed-of-sound value. The bundled synthetic log was generated with a baseline demonstration configuration, so its displayed comparison is illustrative only; it is explicitly excluded from physical-validation evidence.
 
 ---
 
