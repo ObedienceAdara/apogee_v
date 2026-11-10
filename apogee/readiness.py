@@ -71,7 +71,7 @@ def evaluate_readiness_gates(
 
     if not validation_is_physical:
         issues.append(
-            "Stage 5: no non-synthetic physical flight-data validation is available; "
+            "Stage 5: no non-synthetic, configuration-matched physical flight-data validation is available; "
             "synthetic demonstration data cannot satisfy this evidence gate."
         )
     elif validation_within_tolerance is not True:
