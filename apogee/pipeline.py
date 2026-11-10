@@ -76,7 +76,7 @@ def load_mission_config(path: str | Path) -> tuple[MissionConfig, float, float]:
         airframe=AirframeSpec(**raw["airframe"]),
         motor_library_dir=raw["motor_library_dir"],
         n_dispersion_runs=raw.get("n_dispersion_runs", 200),
-        minimum_monte_carlo_convergence_pct=raw.get("minimum_monte_carlo_convergence_pct", 95.0),
+        minimum_monte_carlo_success_rate_pct=raw.get("minimum_monte_carlo_success_rate_pct", 95.0),
         max_safe_impact_velocity_m_s=raw.get("max_safe_impact_velocity_m_s", 7.0),
         stability_safety_threshold_cal=raw.get("stability_safety_threshold_cal", 1.0),
         flight_log_csv=raw.get("flight_log_csv"),
@@ -133,7 +133,7 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     baseline_footprint = baseline_dispersion.landing_ellipse_95.semi_major_m
     log.info("  baseline 95%% ellipse semi-major=%.1fm  apogee=%.1f+/-%.1fm  convergence=%.1f%% (%d/%d)",
               baseline_footprint, baseline_dispersion.apogee_mean_m, baseline_dispersion.apogee_std_m,
-              baseline_dispersion.convergence_rate_pct, baseline_dispersion.n_converged,
+              baseline_dispersion.successful_run_rate_pct, baseline_dispersion.n_completed,
               baseline_dispersion.n_runs)
 
     # ---------------------------------------------------------------- #
@@ -162,8 +162,8 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     confirmed_footprint = confirmed_dispersion.landing_ellipse_95.semi_major_m
     actual_reduction = 100.0 * (baseline_footprint - confirmed_footprint) / baseline_footprint if baseline_footprint else 0.0
     log.info("  confirmed 95%% ellipse semi-major=%.1fm  (%.1f%% change vs baseline)  convergence=%.1f%% (%d/%d)",
-              confirmed_footprint, actual_reduction, confirmed_dispersion.convergence_rate_pct,
-              confirmed_dispersion.n_converged, confirmed_dispersion.n_runs)
+              confirmed_footprint, actual_reduction, confirmed_dispersion.successful_run_rate_pct,
+              confirmed_dispersion.n_completed, confirmed_dispersion.n_runs)
     recovery = recovery.model_copy(
         update={"confirmed_footprint_reduction_pct": round(actual_reduction, 1)}
     )
@@ -225,9 +225,9 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
             abs(sel.apogee_error_pct) <= mission.apogee_tolerance_pct
         ),
         stability_passed=selected_stability.is_stable,
-        baseline_convergence_pct=baseline_dispersion.convergence_rate_pct,
-        confirmation_convergence_pct=confirmed_dispersion.convergence_rate_pct,
-        minimum_convergence_pct=mission.minimum_monte_carlo_convergence_pct,
+        baseline_success_rate_pct=baseline_dispersion.successful_run_rate_pct,
+        confirmation_success_rate_pct=confirmed_dispersion.successful_run_rate_pct,
+        minimum_success_rate_pct=mission.minimum_monte_carlo_success_rate_pct,
         recovery_has_safe_candidate=recovery.has_safe_candidate,
         recovery_recommended_is_safe=recovery.recommended_is_safe,
         validation_is_physical=bool(validation and validation.is_physical_validation),
