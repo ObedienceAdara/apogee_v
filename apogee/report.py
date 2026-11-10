@@ -112,7 +112,7 @@ def generate_plots(report: FlightReadinessReport, out_dir: str | Path) -> dict[s
 
 
 def _motor_table(report: FlightReadinessReport) -> str:
-    lines = ["| Motor | Impulse (Ns) | Class | Apogee (m) | Error (%) | Max Mach | Cert OK | Cost ($) |",
+    lines = ["| Motor | Impulse (Ns) | Class | Apogee (m) | Error (%) | Max Mach | Impulse limit OK? | Cost ($) |",
              "|---|---|---|---|---|---|---|---|"]
     for c in report.motor_selection.shortlist:
         lines.append(
