@@ -23,11 +23,11 @@ from apogee.schemas import FlightReadinessReport
 
 def _plot_dispersion(report: FlightReadinessReport, out_path: Path) -> None:
     d = report.dispersion
-    xs = [r.landing_x_m for r in d.runs if r.converged]
-    ys = [r.landing_y_m for r in d.runs if r.converged]
+    xs = [r.landing_x_m for r in d.runs if r.completed]
+    ys = [r.landing_y_m for r in d.runs if r.completed]
 
     fig, ax = plt.subplots(figsize=(7, 7))
-    ax.scatter(xs, ys, s=18, alpha=0.6, color="#2563eb", label=f"{d.n_converged} MC landings")
+    ax.scatter(xs, ys, s=18, alpha=0.6, color="#2563eb", label=f"{d.n_completed} MC landings")
     ax.scatter([0], [0], marker="*", s=250, color="#dc2626", label="Launch point", zorder=5)
 
     ell = d.landing_ellipse_95
@@ -209,14 +209,14 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append("")
 
     lines.append("## 4. Six-DOF Monte Carlo Dispersion (Stage 2)\n")
-    lines.append(f"- **Baseline:** {baseline.n_converged}/{baseline.n_runs} converged "
-                 f"({baseline.convergence_rate_pct:.2f}%); 95% ellipse semi-major "
+    lines.append(f"- **Baseline:** {baseline.n_completed}/{baseline.n_runs} completed successfully "
+                 f"({baseline.successful_run_rate_pct:.2f}%); 95% ellipse semi-major "
                  f"{baseline.landing_ellipse_95.semi_major_m:.0f} m")
-    lines.append(f"- **Confirmation:** {d.n_converged}/{d.n_runs} converged "
-                 f"({d.convergence_rate_pct:.2f}%); 95% ellipse semi-major "
+    lines.append(f"- **Confirmation:** {d.n_completed}/{d.n_runs} completed successfully "
+                 f"({d.successful_run_rate_pct:.2f}%); 95% ellipse semi-major "
                  f"{d.landing_ellipse_95.semi_major_m:.0f} m")
     lines.append(f"- **Minimum required convergence:** "
-                 f"{m.minimum_monte_carlo_convergence_pct:.2f}%")
+                 f"{m.minimum_monte_carlo_success_rate_pct:.2f}%")
     if d.failure_reasons:
         lines.append(f"- **Failed-run details:** {len(d.failure_reasons)} failure(s); "
                      + "; ".join(d.failure_reasons[:10]))
