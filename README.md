@@ -401,8 +401,8 @@ The generated report deliberately separates **engineering gate status** from **l
 
 - `engineering_gates_passed` means only that the configured software checks passed.
 - `launch_authorization_status` is fixed to `NOT_AUTHORIZED`. This software cannot grant range approval, certify a vehicle or motor, or replace competent human review.
-- A launch time in the past, an environment-gate failure, a motor over the configured total-impulse limit, an out-of-tolerance motor apogee, insufficient stability margin, or a Monte Carlo convergence rate below the configured minimum blocks the engineering gate.
-- Both baseline and optimized-recovery Monte Carlo runs must meet `minimum_monte_carlo_convergence_pct` (95% by default). Failed runs retain their IDs and exception summaries in the result instead of disappearing from the report. At least two runs must converge to calculate a covariance ellipse.
+- A launch time in the past, an environment-gate failure, a motor over the configured total-impulse limit, an out-of-tolerance motor apogee, insufficient stability margin, or a Monte Carlo successful-run rate below the configured minimum blocks the engineering gate.
+- Both baseline and optimized-recovery Monte Carlo runs must meet `minimum_monte_carlo_success_rate_pct` (95% by default). Failed runs retain their IDs and exception summaries in the result instead of disappearing from the report. At least two runs must converge to calculate a covariance ellipse.
 - Recovery optimization must find a candidate within the configured impact-velocity limit. If none exists, the least-impact-velocity candidate is shown for diagnosis only and blocks the gate.
 - A physical-validation evidence gate requires a non-synthetic flight log and an operator attestation that the flight configuration matches the simulated configuration. A source string containing `synthetic` is always classified as synthetic, even when the configuration flag is false. The configuration-match flag is an operator assertion, not independent authentication.
 
