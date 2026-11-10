@@ -34,12 +34,20 @@ from apogee.schemas import FlightLogRecord, ValidationResult
 ACCEPTABLE_ERROR_PCT = 8.0
 
 
-def load_flight_log(csv_path: str | Path) -> FlightLogRecord:
+def load_flight_log(
+    csv_path: str | Path,
+    force_synthetic: bool = False,
+) -> FlightLogRecord:
     path = Path(csv_path)
     with open(path) as f:
         row = next(csv.DictReader(f))
+    source = row.get("source", path.name)
+    # The file marker is an independent guard against accidentally treating
+    # this repository's synthetic fixture as measured hardware data.
+    is_synthetic = force_synthetic or "synthetic" in source.lower()
     return FlightLogRecord(
-        source=row.get("source", path.name),
+        source=source,
+        is_synthetic=is_synthetic,
         apogee_m=float(row["apogee_m"]),
         max_velocity_m_s=float(row["max_velocity_m_s"]),
         descent_rate_m_s=float(row["descent_rate_m_s"]),
@@ -92,6 +100,7 @@ def run_stage5(simulated: FlightLogRecord, actual: FlightLogRecord,
     return ValidationResult(
         simulated=simulated,
         actual=actual,
+        is_physical_validation=not actual.is_synthetic,
         apogee_error_pct=apogee_err,
         velocity_error_pct=velocity_err,
         descent_rate_error_pct=descent_err,
