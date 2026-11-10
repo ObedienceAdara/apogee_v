@@ -145,12 +145,21 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     rc = report.recovery
     v = report.validation
 
-    go_banner = "GO FOR LAUNCH" if report.overall_go_for_launch else "NO-GO — SEE BLOCKING ISSUES"
+    status_banner = (
+        "ENGINEERING GATES PASS — NOT LAUNCH AUTHORIZATION"
+        if report.engineering_gates_passed
+        else "NO-GO — SEE BLOCKING ISSUES"
+    )
 
     lines = []
     lines.append(f"# Flight Readiness Report — {m.mission_name}")
     lines.append(f"\n**Generated:** {report.generated_at_utc.isoformat()}  ")
-    lines.append(f"**Status:** **{go_banner}**\n")
+    lines.append(f"**Engineering analysis status:** **{status_banner}**  ")
+    lines.append(f"**Launch authorization:** **{report.launch_authorization_status}**\n")
+    lines.append(
+        "_This report is decision support only. It does not authorize launch, certify "
+        "the vehicle or motor, or replace range approval and competent human review._\n"
+    )
 
     if report.blocking_issues:
         lines.append("## Blocking Issues\n")
@@ -199,6 +208,13 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
 
     lines.append("## 4. Six-DOF Monte Carlo Dispersion (Stage 2, confirmation run)\n")
     lines.append(f"- **Runs:** {d.n_runs} ({d.n_converged} converged)")
+    lines.append(f"- **Convergence rate:** {d.convergence_rate_pct:.2f}% "
+                 f"(minimum required: {m.minimum_monte_carlo_convergence_pct:.2f}%)")
+    if d.failure_reasons:
+        lines.append(f"- **Failed-run details:** {len(d.failure_reasons)} failure(s); "
+                     + "; ".join(d.failure_reasons[:10]))
+        if len(d.failure_reasons) > 10:
+            lines.append(f"- **Additional failed runs:** {len(d.failure_reasons) - 10}")
     lines.append(f"- **Apogee:** {d.apogee_mean_m:.0f} m +/- {d.apogee_std_m:.0f} m (1-sigma)")
     lines.append(f"- **Max-Q:** {d.max_q_mean_pa/1000:.1f} kPa +/- {d.max_q_std_pa/1000:.1f} kPa")
     ell = d.landing_ellipse_95
@@ -209,6 +225,9 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(f"\n![Landing dispersion ellipse]({plot_paths['dispersion'].name})\n")
 
     lines.append("## 5. Recovery System Optimization (Stage 3)\n")
+    lines.append(f"- **Safe candidate exists:** {'YES' if rc.has_safe_candidate else 'NO'}")
+    lines.append(f"- **Selected candidate meets impact limit:** "
+                 f"{'YES' if rc.recommended_is_safe else 'NO — DIAGNOSTIC ONLY'}")
     lines.append(f"- **Recommended:** drogue Cd·S={rc.recommended.drogue_cd_s:.1f}, "
                  f"main Cd·S={rc.recommended.main_cd_s:.1f}, "
                  f"main deploy altitude={rc.recommended.main_deploy_altitude_m:.0f} m AGL")
@@ -220,7 +239,11 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(f"\n![Recovery drift vs impact-velocity trade-off]({plot_paths['recovery'].name})\n")
 
     if v:
-        lines.append("## 6. Real Flight Validation (Stage 5)\n")
+        lines.append("## 6. Flight-Data Comparison & Validation Evidence (Stage 5)\n")
+        if v.is_physical_validation:
+            lines.append("- **Evidence class:** NON-SYNTHETIC FLIGHT DATA (source supplied by operator; not independently authenticated)")
+        else:
+            lines.append("- **Evidence class:** SYNTHETIC DEMONSTRATION — NOT PHYSICAL VALIDATION")
         lines.append(f"- **Source:** {v.actual.source}")
         lines.append(f"- **Apogee error:** {v.apogee_error_pct:+.2f}%  "
                      f"(sim {v.simulated.apogee_m:.0f} m vs actual {v.actual.apogee_m:.0f} m)")
@@ -232,8 +255,8 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
             lines.append(f"  - {cause}")
         lines.append("")
     else:
-        lines.append("## 6. Real Flight Validation (Stage 5)\n")
-        lines.append("_Skipped — no flight log configured. See README \"Using real flight data.\"_\n")
+        lines.append("## 6. Flight-Data Comparison & Validation Evidence (Stage 5)\n")
+        lines.append("_No flight log supplied. Physical validation evidence is absent._\n")
 
     lines.append("---")
     lines.append("_Report generated automatically by the Apogee pipeline. "
