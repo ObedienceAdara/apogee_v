@@ -395,11 +395,26 @@ It does **not** claim physical validation of a real vehicle.
 
 That distinction is intentional.
 
+### Decision-gate semantics
+
+The generated report deliberately separates **engineering gate status** from **launch authorization**.
+
+- `engineering_gates_passed` means only that the configured software checks passed.
+- `launch_authorization_status` is fixed to `NOT_AUTHORIZED`. This software cannot grant range approval, certify a vehicle or motor, or replace competent human review.
+- A launch time in the past, an environment-gate failure, a motor over the configured total-impulse limit, an out-of-tolerance motor apogee, insufficient stability margin, or a Monte Carlo convergence rate below the configured minimum blocks the engineering gate.
+- Both baseline and optimized-recovery Monte Carlo runs must meet `minimum_monte_carlo_convergence_pct` (95% by default). Failed runs retain their IDs and exception summaries in the result instead of disappearing from the report. At least two runs must converge to calculate a covariance ellipse.
+- Recovery optimization must find a candidate within the configured impact-velocity limit. If none exists, the least-impact-velocity candidate is shown for diagnosis only and blocks the gate.
+- A physical-validation evidence gate requires a non-synthetic flight log and an operator attestation that the flight configuration matches the simulated configuration. A source string containing `synthetic` is always classified as synthetic, even when the configuration flag is false. The configuration-match flag is an operator assertion, not independent authentication.
+
+The demo configuration intentionally marks its included log as synthetic and its configuration match as unverified. It also contains a historical launch date. It must therefore produce a **NO-GO** engineering status. This is expected: the demo is not evidence of launch readiness.
+
+The Stage 5 comparison uses a separate nominal RocketPy flight with the selected motor, fin geometry, and recovery settings. It does not infer velocity from Mach using a fixed speed-of-sound value or compare a Monte Carlo mean against a different baseline configuration.
+
 ---
 
 ## Test Coverage
 
-The current test suite contains **19 unit tests** covering:
+The current test suite contains **32 unit tests** covering:
 
 ### RASP motor parser
 
@@ -425,6 +440,15 @@ The current test suite contains **19 unit tests** covering:
 - smallest-stable-fin selection
 - unstable-candidate exclusion
 - all-unstable fallback behavior
+
+### Readiness and validation gates
+
+- past launch-time rejection
+- motor impulse-limit rejection
+- recovery feasibility and impact-limit rejection
+- baseline and confirmation Monte Carlo convergence thresholds
+- synthetic and unverified flight-log rejection
+- physical-log comparison tolerance
 
 The current tests primarily exercise deterministic logic without running full RocketPy flights, keeping the suite fast.
 
