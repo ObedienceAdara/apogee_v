@@ -33,3 +33,4 @@ stability_safety_threshold_cal: 1.0
 
 flight_log_csv: "data/sample_flight_log.csv"
 flight_log_is_synthetic: true
+flight_log_configuration_verified: false
