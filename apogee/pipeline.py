@@ -171,7 +171,7 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     # ---------------------------------------------------------------- #
     validation = None
     if mission.flight_log_csv and Path(mission.flight_log_csv).exists():
-        log.info("STAGE 5 — Real flight validation")
+        log.info("STAGE 5 — Flight-data comparison and evidence classification")
         actual = load_flight_log(
             mission.flight_log_csv,
             force_synthetic=mission.flight_log_is_synthetic,
