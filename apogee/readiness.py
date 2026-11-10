@@ -13,9 +13,9 @@ def evaluate_readiness_gates(
     motor_within_impulse_limit: bool,
     motor_within_apogee_tolerance: bool,
     stability_passed: bool,
-    baseline_convergence_pct: float,
-    confirmation_convergence_pct: float,
-    minimum_convergence_pct: float,
+    baseline_success_rate_pct: float,
+    confirmation_success_rate_pct: float,
+    minimum_success_rate_pct: float,
     recovery_has_safe_candidate: bool,
     recovery_recommended_is_safe: bool,
     validation_is_physical: bool,
@@ -47,15 +47,15 @@ def evaluate_readiness_gates(
             "Stage 4: no evaluated fin configuration met the minimum static-margin threshold."
         )
 
-    if baseline_convergence_pct < minimum_convergence_pct:
+    if baseline_success_rate_pct < minimum_success_rate_pct:
         issues.append(
-            f"Stage 2 baseline: Monte Carlo convergence {baseline_convergence_pct:.2f}% "
-            f"is below the required {minimum_convergence_pct:.2f}%."
+            f"Stage 2 baseline: Monte Carlo successful-run rate {baseline_success_rate_pct:.2f}% "
+            f"is below the required {minimum_success_rate_pct:.2f}%."
         )
-    if confirmation_convergence_pct < minimum_convergence_pct:
+    if confirmation_success_rate_pct < minimum_success_rate_pct:
         issues.append(
-            f"Stage 2 confirmation: Monte Carlo convergence {confirmation_convergence_pct:.2f}% "
-            f"is below the required {minimum_convergence_pct:.2f}%."
+            f"Stage 2 confirmation: Monte Carlo successful-run rate {confirmation_success_rate_pct:.2f}% "
+            f"is below the required {minimum_success_rate_pct:.2f}%."
         )
 
     if not recovery_has_safe_candidate:
