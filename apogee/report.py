@@ -141,6 +141,7 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     e = report.environment
     ms = report.motor_selection
     s = report.stability
+    baseline = report.baseline_dispersion
     d = report.dispersion
     rc = report.recovery
     v = report.validation
@@ -207,10 +208,15 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(_stability_table(report, all_stability_results))
     lines.append("")
 
-    lines.append("## 4. Six-DOF Monte Carlo Dispersion (Stage 2, confirmation run)\n")
-    lines.append(f"- **Runs:** {d.n_runs} ({d.n_converged} converged)")
-    lines.append(f"- **Convergence rate:** {d.convergence_rate_pct:.2f}% "
-                 f"(minimum required: {m.minimum_monte_carlo_convergence_pct:.2f}%)")
+    lines.append("## 4. Six-DOF Monte Carlo Dispersion (Stage 2)\n")
+    lines.append(f"- **Baseline:** {baseline.n_converged}/{baseline.n_runs} converged "
+                 f"({baseline.convergence_rate_pct:.2f}%); 95% ellipse semi-major "
+                 f"{baseline.landing_ellipse_95.semi_major_m:.0f} m")
+    lines.append(f"- **Confirmation:** {d.n_converged}/{d.n_runs} converged "
+                 f"({d.convergence_rate_pct:.2f}%); 95% ellipse semi-major "
+                 f"{d.landing_ellipse_95.semi_major_m:.0f} m")
+    lines.append(f"- **Minimum required convergence:** "
+                 f"{m.minimum_monte_carlo_convergence_pct:.2f}%")
     if d.failure_reasons:
         lines.append(f"- **Failed-run details:** {len(d.failure_reasons)} failure(s); "
                      + "; ".join(d.failure_reasons[:10]))
