@@ -40,7 +40,8 @@ from apogee.stage3_recovery import run_stage3
 from apogee.stage4_stability import sweep_fin_geometry
 from apogee.stage5_validation import load_flight_log, run_stage5
 from apogee.utils.motor_parser import parse_eng_file
-from apogee.utils.rocket_builder import build_motor_from_curve
+from apogee.utils.rocket_builder import build_motor_from_curve, build_rocket
+from rocketpy import Flight
 from apogee.readiness import evaluate_readiness_gates
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -80,6 +81,7 @@ def load_mission_config(path: str | Path) -> tuple[MissionConfig, float, float]:
         stability_safety_threshold_cal=raw.get("stability_safety_threshold_cal", 1.0),
         flight_log_csv=raw.get("flight_log_csv"),
         flight_log_is_synthetic=raw.get("flight_log_is_synthetic", False),
+        flight_log_configuration_verified=raw.get("flight_log_configuration_verified", False),
     ), raw.get("surface_wind_m_s", 4.5), raw.get("surface_wind_heading_deg", 270.0)
 
 
@@ -162,6 +164,9 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     log.info("  confirmed 95%% ellipse semi-major=%.1fm  (%.1f%% change vs baseline)  convergence=%.1f%% (%d/%d)",
               confirmed_footprint, actual_reduction, confirmed_dispersion.convergence_rate_pct,
               confirmed_dispersion.n_converged, confirmed_dispersion.n_runs)
+    recovery = recovery.model_copy(
+        update={"confirmed_footprint_reduction_pct": round(actual_reduction, 1)}
+    )
 
     # ---------------------------------------------------------------- #
     validation = None
@@ -170,18 +175,38 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
         actual = load_flight_log(
             mission.flight_log_csv,
             force_synthetic=mission.flight_log_is_synthetic,
+            configuration_verified=mission.flight_log_configuration_verified,
         )
         from apogee.schemas import FlightLogRecord
-        # Use the same completed Monte Carlo result set for the simulated
-        # reference metrics; do not infer velocity from Mach using a fixed
-        # speed-of-sound constant.
+        # Produce a nominal reference flight with the exact selected motor,
+        # selected fin geometry and optimized recovery configuration. A
+        # Monte Carlo mean is not a substitute for a like-for-like nominal run.
+        validation_motor = build_motor_from_curve(curve, sel.thrust_curve_file)
+        validation_rocket = build_rocket(
+            mission.airframe,
+            validation_motor,
+            fin=fin,
+            add_parachutes=True,
+            drogue_cd_s=recovery.recommended.drogue_cd_s,
+            main_cd_s=recovery.recommended.main_cd_s,
+            main_deploy_altitude_m=recovery.recommended.main_deploy_altitude_m,
+        )
+        validation_flight = Flight(
+            rocket=validation_rocket,
+            environment=env,
+            rail_length=mission.airframe.rail_length_m,
+            inclination=84,
+            heading=90,
+            terminate_on_apogee=False,
+            max_time=400,
+            verbose=False,
+        )
         simulated = FlightLogRecord(
-            source="rocketpy_confirmed_monte_carlo_mean",
-            apogee_m=confirmed_dispersion.apogee_mean_m,
-            max_velocity_m_s=confirmed_dispersion.max_velocity_mean_m_s,
-            descent_rate_m_s=recovery.recommended.predicted_impact_velocity_m_s,
-            flight_time_s=sum(r.flight_time_s for r in confirmed_dispersion.runs if r.converged)
-            / confirmed_dispersion.n_converged,
+            source="rocketpy_nominal_selected_configuration",
+            apogee_m=validation_flight.apogee - env.elevation,
+            max_velocity_m_s=validation_flight.max_speed,
+            descent_rate_m_s=abs(validation_flight.speed(validation_flight.t_final)),
+            flight_time_s=validation_flight.t_final,
         )
         validation = run_stage5(simulated, actual)
         log.info("  source=%s physical=%s  apogee_error=%.2f%%  velocity_error=%.2f%%  descent_error=%.2f%%  within_tolerance=%s",
