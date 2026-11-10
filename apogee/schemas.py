@@ -266,6 +266,7 @@ class FlightReadinessReport(BaseModel):
     environment: EnvironmentReport
     motor_selection: MotorSelectionResult
     stability: StabilityResult
+    baseline_dispersion: DispersionAnalysisResult
     dispersion: DispersionAnalysisResult
     recovery: RecoveryOptimizationResult
     validation: Optional[ValidationResult] = None
