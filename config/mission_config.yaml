@@ -26,8 +26,10 @@ airframe:
 motor_library_dir: "config/motors"
 
 n_dispersion_runs: 120
+minimum_monte_carlo_convergence_pct: 95.0
 
 max_safe_impact_velocity_m_s: 7.0
 stability_safety_threshold_cal: 1.0
 
 flight_log_csv: "data/sample_flight_log.csv"
+flight_log_is_synthetic: true
