@@ -215,7 +215,7 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(f"- **Confirmation:** {d.n_completed}/{d.n_runs} completed successfully "
                  f"({d.successful_run_rate_pct:.2f}%); 95% ellipse semi-major "
                  f"{d.landing_ellipse_95.semi_major_m:.0f} m")
-    lines.append(f"- **Minimum required convergence:** "
+    lines.append(f"- **Minimum required successful-run rate:** "
                  f"{m.minimum_monte_carlo_success_rate_pct:.2f}%")
     if d.failure_reasons:
         lines.append(f"- **Failed-run details:** {len(d.failure_reasons)} failure(s); "
