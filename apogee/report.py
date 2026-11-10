@@ -23,11 +23,11 @@ from apogee.schemas import FlightReadinessReport
 
 def _plot_dispersion(report: FlightReadinessReport, out_path: Path) -> None:
     d = report.dispersion
-    xs = [r.landing_x_m for r in d.runs if r.converged]
-    ys = [r.landing_y_m for r in d.runs if r.converged]
+    xs = [r.landing_x_m for r in d.runs if r.completed]
+    ys = [r.landing_y_m for r in d.runs if r.completed]
 
     fig, ax = plt.subplots(figsize=(7, 7))
-    ax.scatter(xs, ys, s=18, alpha=0.6, color="#2563eb", label=f"{d.n_converged} MC landings")
+    ax.scatter(xs, ys, s=18, alpha=0.6, color="#2563eb", label=f"{d.n_completed} MC landings")
     ax.scatter([0], [0], marker="*", s=250, color="#dc2626", label="Launch point", zorder=5)
 
     ell = d.landing_ellipse_95
@@ -112,7 +112,7 @@ def generate_plots(report: FlightReadinessReport, out_dir: str | Path) -> dict[s
 
 
 def _motor_table(report: FlightReadinessReport) -> str:
-    lines = ["| Motor | Impulse (Ns) | Class | Apogee (m) | Error (%) | Max Mach | Cert OK | Cost ($) |",
+    lines = ["| Motor | Impulse (Ns) | Class | Apogee (m) | Error (%) | Max Mach | Impulse limit OK? | Cost ($) |",
              "|---|---|---|---|---|---|---|---|"]
     for c in report.motor_selection.shortlist:
         lines.append(
@@ -141,16 +141,26 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     e = report.environment
     ms = report.motor_selection
     s = report.stability
+    baseline = report.baseline_dispersion
     d = report.dispersion
     rc = report.recovery
     v = report.validation
 
-    go_banner = "GO FOR LAUNCH" if report.overall_go_for_launch else "NO-GO — SEE BLOCKING ISSUES"
+    status_banner = (
+        "ENGINEERING GATES PASS — NOT LAUNCH AUTHORIZATION"
+        if report.engineering_gates_passed
+        else "NO-GO — SEE BLOCKING ISSUES"
+    )
 
     lines = []
     lines.append(f"# Flight Readiness Report — {m.mission_name}")
     lines.append(f"\n**Generated:** {report.generated_at_utc.isoformat()}  ")
-    lines.append(f"**Status:** **{go_banner}**\n")
+    lines.append(f"**Engineering analysis status:** **{status_banner}**  ")
+    lines.append(f"**Launch authorization:** **{report.launch_authorization_status}**\n")
+    lines.append(
+        "_This report is decision support only. It does not authorize launch, certify "
+        "the vehicle or motor, or replace range approval and competent human review._\n"
+    )
 
     if report.blocking_issues:
         lines.append("## Blocking Issues\n")
@@ -166,7 +176,7 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
                  f"({'civil twilight or darker' if e.scorecard.is_civil_twilight_or_darker else 'daylight'})")
     lines.append(f"- **Max ground-band wind:** {e.scorecard.max_wind_speed_m_s:.1f} m/s "
                  f"({'within limits' if e.scorecard.wind_within_limits else 'EXCEEDS LIMIT'})")
-    lines.append(f"- **Go/No-Go:** {'GO' if e.scorecard.overall_go else 'NO-GO'}")
+    lines.append(f"- **Configured wind gate:** {'PASS' if e.scorecard.overall_go else 'NO-GO'}")
     for note in e.scorecard.notes:
         lines.append(f"  - {note}")
     lines.append("")
@@ -177,6 +187,7 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
                  f"({ms.selected.total_impulse_n_s:.0f} Ns, class {ms.selected.impulse_class.value})")
     lines.append(f"- **Predicted apogee:** {ms.selected.predicted_apogee_m:.0f} m "
                  f"({ms.selected.apogee_error_pct:+.2f}% from target)")
+    lines.append(f"- **Configured impulse eligibility:** {'PASS' if ms.selected.passes_certification else 'FAIL'}")
     lines.append(f"- **Predicted Max-Q:** {ms.selected.predicted_max_q_pa/1000:.1f} kPa | "
                  f"**Max Mach:** {ms.selected.predicted_max_mach:.2f}\n")
     lines.append("**Motor trade study (shortlist):**\n")
@@ -197,8 +208,20 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(_stability_table(report, all_stability_results))
     lines.append("")
 
-    lines.append("## 4. Six-DOF Monte Carlo Dispersion (Stage 2, confirmation run)\n")
-    lines.append(f"- **Runs:** {d.n_runs} ({d.n_converged} converged)")
+    lines.append("## 4. Six-DOF Monte Carlo Dispersion (Stage 2)\n")
+    lines.append(f"- **Baseline:** {baseline.n_completed}/{baseline.n_runs} completed successfully "
+                 f"({baseline.successful_run_rate_pct:.2f}%); 95% ellipse semi-major "
+                 f"{baseline.landing_ellipse_95.semi_major_m:.0f} m")
+    lines.append(f"- **Confirmation:** {d.n_completed}/{d.n_runs} completed successfully "
+                 f"({d.successful_run_rate_pct:.2f}%); 95% ellipse semi-major "
+                 f"{d.landing_ellipse_95.semi_major_m:.0f} m")
+    lines.append(f"- **Minimum required successful-run rate:** "
+                 f"{m.minimum_monte_carlo_success_rate_pct:.2f}%")
+    if d.failure_reasons:
+        lines.append(f"- **Failed-run details:** {len(d.failure_reasons)} failure(s); "
+                     + "; ".join(d.failure_reasons[:10]))
+        if len(d.failure_reasons) > 10:
+            lines.append(f"- **Additional failed runs:** {len(d.failure_reasons) - 10}")
     lines.append(f"- **Apogee:** {d.apogee_mean_m:.0f} m +/- {d.apogee_std_m:.0f} m (1-sigma)")
     lines.append(f"- **Max-Q:** {d.max_q_mean_pa/1000:.1f} kPa +/- {d.max_q_std_pa/1000:.1f} kPa")
     ell = d.landing_ellipse_95
@@ -209,18 +232,30 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(f"\n![Landing dispersion ellipse]({plot_paths['dispersion'].name})\n")
 
     lines.append("## 5. Recovery System Optimization (Stage 3)\n")
+    lines.append(f"- **Safe candidate exists:** {'YES' if rc.has_safe_candidate else 'NO'}")
+    lines.append(f"- **Selected candidate meets impact limit:** "
+                 f"{'YES' if rc.recommended_is_safe else 'NO — DIAGNOSTIC ONLY'}")
     lines.append(f"- **Recommended:** drogue Cd·S={rc.recommended.drogue_cd_s:.1f}, "
                  f"main Cd·S={rc.recommended.main_cd_s:.1f}, "
                  f"main deploy altitude={rc.recommended.main_deploy_altitude_m:.0f} m AGL")
     lines.append(f"- **Predicted drift:** {rc.recommended.predicted_drift_m:.0f} m | "
                  f"**Impact velocity:** {rc.recommended.predicted_impact_velocity_m_s:.2f} m/s "
                  f"(limit {rc.max_safe_impact_velocity_m_s:.1f} m/s)")
-    lines.append(f"- **Footprint reduction vs. baseline config:** {rc.footprint_reduction_pct:.1f}%")
+    lines.append(f"- **Nominal single-flight drift reduction:** {rc.footprint_reduction_pct:.1f}%")
+    if rc.confirmed_footprint_reduction_pct is not None:
+        lines.append(f"- **Confirmed Monte Carlo ellipse semi-major-axis reduction:** "
+                     f"{rc.confirmed_footprint_reduction_pct:.1f}%")
     lines.append(f"- **Pareto-optimal candidates:** {len(rc.pareto_front)} of {len(rc.candidates)} evaluated")
     lines.append(f"\n![Recovery drift vs impact-velocity trade-off]({plot_paths['recovery'].name})\n")
 
     if v:
-        lines.append("## 6. Real Flight Validation (Stage 5)\n")
+        lines.append("## 6. Flight-Data Comparison & Validation Evidence (Stage 5)\n")
+        if v.is_physical_validation:
+            lines.append("- **Evidence class:** NON-SYNTHETIC FLIGHT DATA; operator attests configuration match (not independently authenticated)")
+        elif v.actual.is_synthetic:
+            lines.append("- **Evidence class:** SYNTHETIC DEMONSTRATION — NOT PHYSICAL VALIDATION")
+        else:
+            lines.append("- **Evidence class:** NON-SYNTHETIC DATA, BUT CONFIGURATION MATCH IS NOT ATTESTED — NOT ACCEPTED AS VALIDATION EVIDENCE")
         lines.append(f"- **Source:** {v.actual.source}")
         lines.append(f"- **Apogee error:** {v.apogee_error_pct:+.2f}%  "
                      f"(sim {v.simulated.apogee_m:.0f} m vs actual {v.actual.apogee_m:.0f} m)")
@@ -232,8 +267,8 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
             lines.append(f"  - {cause}")
         lines.append("")
     else:
-        lines.append("## 6. Real Flight Validation (Stage 5)\n")
-        lines.append("_Skipped — no flight log configured. See README \"Using real flight data.\"_\n")
+        lines.append("## 6. Flight-Data Comparison & Validation Evidence (Stage 5)\n")
+        lines.append("_No flight log supplied. Physical validation evidence is absent._\n")
 
     lines.append("---")
     lines.append("_Report generated automatically by the Apogee pipeline. "

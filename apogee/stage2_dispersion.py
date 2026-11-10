@@ -133,17 +133,19 @@ def _run_one(inputs: DispersionRunInputs) -> DispersionRunResult:
             apogee_m=round(flight.apogee - env.elevation, 2),
             max_q_pa=round(flight.max_dynamic_pressure, 2),
             max_mach=round(flight.max_mach_number, 4),
+            max_velocity_m_s=round(flight.max_speed, 2),
             landing_x_m=round(flight.x_impact, 2),
             landing_y_m=round(flight.y_impact, 2),
             time_to_apogee_s=round(flight.apogee_time, 2),
             flight_time_s=round(flight.t_final, 2),
-            converged=True,
+            completed=True,
         )
-    except Exception:
+    except Exception as exc:
         return DispersionRunResult(
             run_id=inputs.run_id, apogee_m=0, max_q_pa=0, max_mach=0,
-            landing_x_m=0, landing_y_m=0, time_to_apogee_s=0, flight_time_s=0,
-            converged=False,
+            max_velocity_m_s=0, landing_x_m=0, landing_y_m=0,
+            time_to_apogee_s=0, flight_time_s=0, completed=False,
+            failure_reason=f"{type(exc).__name__}: {exc}",
         )
 
 
@@ -205,25 +207,38 @@ def run_stage2(site: LaunchSite, launch_dt_iso: str, base_wind_profile: list[tup
             results.append(fut.result())
     results.sort(key=lambda r: r.run_id)
 
-    converged = [r for r in results if r.converged]
-    n_converged = len(converged)
-    if n_converged == 0:
-        raise RuntimeError("All Monte Carlo dispersion runs failed to converge — check inputs.")
+    successful = [r for r in results if r.completed]
+    n_completed = len(successful)
+    if n_completed < 2:
+        raise RuntimeError(
+            f"Only {n_completed}/{n_runs} Monte Carlo runs completed; at least 2 are "
+            "required to estimate landing covariance. No dispersion result can be reported."
+        )
 
-    x = np.array([r.landing_x_m for r in converged])
-    y = np.array([r.landing_y_m for r in converged])
-    apogees = np.array([r.apogee_m for r in converged])
-    max_qs = np.array([r.max_q_pa for r in converged])
+    x = np.array([r.landing_x_m for r in successful])
+    y = np.array([r.landing_y_m for r in successful])
+    apogees = np.array([r.apogee_m for r in successful])
+    max_qs = np.array([r.max_q_pa for r in successful])
+    max_velocities = np.array([r.max_velocity_m_s for r in successful])
+    failure_reasons = [
+        f"run {r.run_id}: {r.failure_reason or 'unspecified simulation failure'}"
+        for r in results if not r.completed
+    ]
+    successful_run_rate_pct = 100.0 * n_completed / n_runs if n_runs else 0.0
 
     ellipse = _confidence_ellipse(x, y)
 
     return DispersionAnalysisResult(
         n_runs=n_runs,
-        n_converged=n_converged,
+        n_completed=n_completed,
+        successful_run_rate_pct=round(successful_run_rate_pct, 2),
+        failure_reasons=failure_reasons,
         runs=results,
         landing_ellipse_95=ellipse,
         apogee_mean_m=round(float(np.mean(apogees)), 2),
         apogee_std_m=round(float(np.std(apogees)), 2),
         max_q_mean_pa=round(float(np.mean(max_qs)), 2),
         max_q_std_pa=round(float(np.std(max_qs)), 2),
+        max_velocity_mean_m_s=round(float(np.mean(max_velocities)), 2),
+        max_velocity_std_m_s=round(float(np.std(max_velocities)), 2),
     )

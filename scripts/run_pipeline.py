@@ -34,7 +34,7 @@ from apogee.report import generate_plots, render_markdown
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the Apogee mission certification pipeline")
+    parser = argparse.ArgumentParser(description="Run the Apogee mission analysis pipeline")
     parser.add_argument("--config", default="config/mission_config.yaml",
                          help="Path to mission_config.yaml")
     parser.add_argument("--quick", action="store_true",
@@ -57,7 +57,14 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"STATUS: {'GO FOR LAUNCH' if report.overall_go_for_launch else 'NO-GO'}")
+    print(
+        "STATUS: ENGINEERING GATES PASS (NOT LAUNCH AUTHORIZATION)"
+        if report.engineering_gates_passed
+        else "STATUS: NO-GO"
+    )
+    print(f"Launch authorization: {report.launch_authorization_status}")
+    if report.blocking_issues:
+        print(f"Blocking issues: {len(report.blocking_issues)}")
     print(f"Report:  {md_path}")
     print(f"Data:    {json_path}")
     print(f"Plots:   {out_dir}/*.png")

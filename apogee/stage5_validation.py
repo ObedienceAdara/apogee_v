@@ -13,8 +13,9 @@ flight time — the fields every commercial altimeter, e.g. a PerfectFlite
 or Eggtimer, logs by default) and compares it against what RocketPy
 predicted for the *same* nominal conditions, producing a signed
 percentage error per metric plus a plain-language explanation of likely
-error sources — not just a number, but the engineering reasoning behind
-it, the way a real post-flight report would.
+error sources. A non-synthetic log only counts as physical-validation
+evidence when the operator attests that its vehicle configuration matches
+the simulated configuration; this attestation is not independently verified.
 
 No hardware flight was flown for this repo (it's a software deliverable),
 so ``data/sample_flight_log.csv`` is a clearly-labeled SYNTHETIC demo log
@@ -34,12 +35,22 @@ from apogee.schemas import FlightLogRecord, ValidationResult
 ACCEPTABLE_ERROR_PCT = 8.0
 
 
-def load_flight_log(csv_path: str | Path) -> FlightLogRecord:
+def load_flight_log(
+    csv_path: str | Path,
+    force_synthetic: bool = False,
+    configuration_verified: bool = False,
+) -> FlightLogRecord:
     path = Path(csv_path)
     with open(path) as f:
         row = next(csv.DictReader(f))
+    source = row.get("source", path.name)
+    # The file marker is an independent guard against accidentally treating
+    # this repository's synthetic fixture as measured hardware data.
+    is_synthetic = force_synthetic or "synthetic" in source.lower()
     return FlightLogRecord(
-        source=row.get("source", path.name),
+        source=source,
+        is_synthetic=is_synthetic,
+        configuration_verified=configuration_verified,
         apogee_m=float(row["apogee_m"]),
         max_velocity_m_s=float(row["max_velocity_m_s"]),
         descent_rate_m_s=float(row["descent_rate_m_s"]),
@@ -92,6 +103,9 @@ def run_stage5(simulated: FlightLogRecord, actual: FlightLogRecord,
     return ValidationResult(
         simulated=simulated,
         actual=actual,
+        is_physical_validation=(
+            not actual.is_synthetic and actual.configuration_verified
+        ),
         apogee_error_pct=apogee_err,
         velocity_error_pct=velocity_err,
         descent_rate_error_pct=descent_err,

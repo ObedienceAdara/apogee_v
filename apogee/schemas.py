@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -150,11 +150,13 @@ class DispersionRunResult(BaseModel):
     apogee_m: float
     max_q_pa: float
     max_mach: float
+    max_velocity_m_s: float = 0.0
     landing_x_m: float
     landing_y_m: float
     time_to_apogee_s: float
     flight_time_s: float
-    converged: bool
+    completed: bool
+    failure_reason: Optional[str] = None
 
 
 class DispersionEllipse(BaseModel):
@@ -168,13 +170,17 @@ class DispersionEllipse(BaseModel):
 
 class DispersionAnalysisResult(BaseModel):
     n_runs: int
-    n_converged: int
+    n_completed: int
+    successful_run_rate_pct: float
+    failure_reasons: list[str] = Field(default_factory=list)
     runs: list[DispersionRunResult]
     landing_ellipse_95: DispersionEllipse
     apogee_mean_m: float
     apogee_std_m: float
     max_q_mean_pa: float
     max_q_std_pa: float
+    max_velocity_mean_m_s: float
+    max_velocity_std_m_s: float
 
 
 # --------------------------------------------------------------------------- #
@@ -192,10 +198,13 @@ class RecoveryCandidate(BaseModel):
 
 class RecoveryOptimizationResult(BaseModel):
     max_safe_impact_velocity_m_s: float
+    has_safe_candidate: bool
+    recommended_is_safe: bool
     candidates: list[RecoveryCandidate]
     pareto_front: list[RecoveryCandidate]
     recommended: RecoveryCandidate
     footprint_reduction_pct: float
+    confirmed_footprint_reduction_pct: Optional[float] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -204,15 +213,18 @@ class RecoveryOptimizationResult(BaseModel):
 
 class FlightLogRecord(BaseModel):
     source: str = Field(..., description="e.g. 'synthetic_demo' or a real logger filename")
-    apogee_m: float
-    max_velocity_m_s: float
-    descent_rate_m_s: float
-    flight_time_s: float
+    is_synthetic: bool = False
+    configuration_verified: bool = False
+    apogee_m: float = Field(..., gt=0)
+    max_velocity_m_s: float = Field(..., gt=0)
+    descent_rate_m_s: float = Field(..., gt=0)
+    flight_time_s: float = Field(..., gt=0)
 
 
 class ValidationResult(BaseModel):
     simulated: FlightLogRecord
     actual: FlightLogRecord
+    is_physical_validation: bool
     apogee_error_pct: float
     velocity_error_pct: float
     descent_rate_error_pct: float
@@ -234,9 +246,12 @@ class MissionConfig(BaseModel):
     airframe: AirframeSpec
     motor_library_dir: str
     n_dispersion_runs: int = 200
+    minimum_monte_carlo_success_rate_pct: float = Field(default=95.0, gt=0, le=100)
     max_safe_impact_velocity_m_s: float = 7.0
     stability_safety_threshold_cal: float = 1.0
     flight_log_csv: Optional[str] = None
+    flight_log_is_synthetic: bool = False
+    flight_log_configuration_verified: bool = False
 
     @field_validator("apogee_tolerance_pct")
     @classmethod
@@ -251,9 +266,12 @@ class FlightReadinessReport(BaseModel):
     environment: EnvironmentReport
     motor_selection: MotorSelectionResult
     stability: StabilityResult
+    baseline_dispersion: DispersionAnalysisResult
     dispersion: DispersionAnalysisResult
     recovery: RecoveryOptimizationResult
     validation: Optional[ValidationResult] = None
     generated_at_utc: datetime
-    overall_go_for_launch: bool
+    engineering_gates_passed: bool
+    # This software cannot grant range approval, certify hardware, or authorize a launch.
+    launch_authorization_status: Literal["NOT_AUTHORIZED"] = "NOT_AUTHORIZED"
     blocking_issues: list[str] = Field(default_factory=list)

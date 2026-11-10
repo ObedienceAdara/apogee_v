@@ -79,6 +79,32 @@ def _compute_pareto_front(candidates: list[RecoveryCandidate]) -> list[RecoveryC
     front.sort(key=lambda c: c.predicted_drift_m)
     return front
 
+def _select_recommendation(
+    candidates: list[RecoveryCandidate],
+    max_safe_impact_velocity_m_s: float,
+) -> tuple[RecoveryCandidate, bool]:
+    """Select the lowest-drift safe candidate.
+
+    If no candidate is safe, return the least-impact-velocity candidate for
+    diagnostic purposes and report that the optimization is infeasible. The
+    fallback must never be mistaken for a safety-compliant recommendation.
+    """
+    if not candidates:
+        raise ValueError("Recovery optimization produced no candidates.")
+
+    safe = [
+        c for c in candidates
+        if c.predicted_impact_velocity_m_s <= max_safe_impact_velocity_m_s
+    ]
+    if safe:
+        return min(safe, key=lambda c: c.predicted_drift_m), True
+
+    least_unsafe = min(
+        candidates,
+        key=lambda c: (c.predicted_impact_velocity_m_s, c.predicted_drift_m),
+    )
+    return least_unsafe, False
+
 
 def run_stage3(airframe: AirframeSpec, motor: SolidMotor, env: Environment, fin: FinGeometry,
                rail_length_m: float, max_safe_impact_velocity_m_s: float = 7.0,
@@ -100,9 +126,12 @@ def run_stage3(airframe: AirframeSpec, motor: SolidMotor, env: Environment, fin:
 
     pareto_front = _compute_pareto_front(candidates)
 
-    safe_candidates = [c for c in candidates if c.predicted_impact_velocity_m_s <= max_safe_impact_velocity_m_s]
-    pool = safe_candidates if safe_candidates else candidates
-    recommended = min(pool, key=lambda c: c.predicted_drift_m)
+    recommended, has_safe_candidate = _select_recommendation(
+        candidates, max_safe_impact_velocity_m_s
+    )
+    recommended_is_safe = (
+        recommended.predicted_impact_velocity_m_s <= max_safe_impact_velocity_m_s
+    )
 
     # Footprint reduction is measured against the SAME nominal (unperturbed)
     # simulation basis as every other candidate — i.e. the pre-optimization
@@ -124,6 +153,8 @@ def run_stage3(airframe: AirframeSpec, motor: SolidMotor, env: Environment, fin:
 
     return RecoveryOptimizationResult(
         max_safe_impact_velocity_m_s=max_safe_impact_velocity_m_s,
+        has_safe_candidate=has_safe_candidate,
+        recommended_is_safe=recommended_is_safe,
         candidates=candidates,
         pareto_front=pareto_front,
         recommended=recommended,
