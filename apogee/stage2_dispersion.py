@@ -216,10 +216,10 @@ def run_stage2(site: LaunchSite, launch_dt_iso: str, base_wind_profile: list[tup
         )
 
     x = np.array([r.landing_x_m for r in successful])
-    y = np.array([r.landing_y_m for r in converged])
-    apogees = np.array([r.apogee_m for r in converged])
-    max_qs = np.array([r.max_q_pa for r in converged])
-    max_velocities = np.array([r.max_velocity_m_s for r in converged])
+    y = np.array([r.landing_y_m for r in successful])
+    apogees = np.array([r.apogee_m for r in successful])
+    max_qs = np.array([r.max_q_pa for r in successful])
+    max_velocities = np.array([r.max_velocity_m_s for r in successful])
     failure_reasons = [
         f"run {r.run_id}: {r.failure_reason or 'unspecified simulation failure'}"
         for r in results if not r.completed
