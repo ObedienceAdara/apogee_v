@@ -34,7 +34,7 @@ from apogee.report import generate_plots, render_markdown
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the Apogee mission certification pipeline")
+    parser = argparse.ArgumentParser(description="Run the Apogee mission analysis pipeline")
     parser.add_argument("--config", default="config/mission_config.yaml",
                          help="Path to mission_config.yaml")
     parser.add_argument("--quick", action="store_true",
