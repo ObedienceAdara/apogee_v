@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from apogee.schemas import RecoveryCandidate
-from apogee.stage3_recovery import _compute_pareto_front
+from apogee.stage3_recovery import _compute_pareto_front, _select_recommendation
 
 
 def _c(drift, impact_v):
@@ -55,3 +55,27 @@ def test_pareto_flag_set_on_result_objects():
     _compute_pareto_front([a, b])
     assert a.is_pareto_optimal is True
     assert b.is_pareto_optimal is False
+
+
+
+def test_no_safe_recovery_candidate_selects_least_unsafe_for_diagnostics():
+    candidates = [
+        _c(drift=300, impact_v=9.0),
+        _c(drift=900, impact_v=7.8),
+        _c(drift=500, impact_v=8.1),
+    ]
+    selected, has_safe = _select_recommendation(candidates, max_safe_impact_velocity_m_s=7.0)
+    assert has_safe is False
+    assert selected.predicted_impact_velocity_m_s == 7.8
+    assert selected.predicted_drift_m == 900
+
+
+def test_safe_recovery_candidate_with_lowest_drift_is_selected():
+    candidates = [
+        _c(drift=300, impact_v=7.2),
+        _c(drift=600, impact_v=6.8),
+        _c(drift=800, impact_v=5.0),
+    ]
+    selected, has_safe = _select_recommendation(candidates, max_safe_impact_velocity_m_s=7.0)
+    assert has_safe is True
+    assert selected.predicted_drift_m == 600
