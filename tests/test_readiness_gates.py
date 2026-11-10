@@ -10,9 +10,9 @@ def _evaluate(**overrides):
         motor_within_impulse_limit=True,
         motor_within_apogee_tolerance=True,
         stability_passed=True,
-        baseline_convergence_pct=100.0,
-        confirmation_convergence_pct=100.0,
-        minimum_convergence_pct=95.0,
+        baseline_success_rate_pct=100.0,
+        confirmation_success_rate_pct=100.0,
+        minimum_success_rate_pct=95.0,
         recovery_has_safe_candidate=True,
         recovery_recommended_is_safe=True,
         validation_is_physical=True,
@@ -49,10 +49,10 @@ def test_recommended_recovery_must_meet_impact_limit():
     assert any("violates the maximum impact-velocity constraint" in issue for issue in issues)
 
 
-def test_baseline_and_confirmation_convergence_are_independent_gates():
+def test_baseline_and_confirmation_success_rates_are_independent_gates():
     issues = _evaluate(
-        baseline_convergence_pct=90.0,
-        confirmation_convergence_pct=92.0,
+        baseline_success_rate_pct=90.0,
+        confirmation_success_rate_pct=92.0,
     )
     assert any("baseline" in issue and "90.00%" in issue for issue in issues)
     assert any("confirmation" in issue and "92.00%" in issue for issue in issues)
