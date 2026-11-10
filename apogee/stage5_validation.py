@@ -37,6 +37,7 @@ ACCEPTABLE_ERROR_PCT = 8.0
 def load_flight_log(
     csv_path: str | Path,
     force_synthetic: bool = False,
+    configuration_verified: bool = False,
 ) -> FlightLogRecord:
     path = Path(csv_path)
     with open(path) as f:
@@ -48,6 +49,7 @@ def load_flight_log(
     return FlightLogRecord(
         source=source,
         is_synthetic=is_synthetic,
+        configuration_verified=configuration_verified,
         apogee_m=float(row["apogee_m"]),
         max_velocity_m_s=float(row["max_velocity_m_s"]),
         descent_rate_m_s=float(row["descent_rate_m_s"]),
@@ -100,7 +102,9 @@ def run_stage5(simulated: FlightLogRecord, actual: FlightLogRecord,
     return ValidationResult(
         simulated=simulated,
         actual=actual,
-        is_physical_validation=not actual.is_synthetic,
+        is_physical_validation=(
+            not actual.is_synthetic and actual.configuration_verified
+        ),
         apogee_error_pct=apogee_err,
         velocity_error_pct=velocity_err,
         descent_rate_error_pct=descent_err,
