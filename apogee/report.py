@@ -175,7 +175,7 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
                  f"({'civil twilight or darker' if e.scorecard.is_civil_twilight_or_darker else 'daylight'})")
     lines.append(f"- **Max ground-band wind:** {e.scorecard.max_wind_speed_m_s:.1f} m/s "
                  f"({'within limits' if e.scorecard.wind_within_limits else 'EXCEEDS LIMIT'})")
-    lines.append(f"- **Go/No-Go:** {'GO' if e.scorecard.overall_go else 'NO-GO'}")
+    lines.append(f"- **Configured wind gate:** {'PASS' if e.scorecard.overall_go else 'NO-GO'}")
     for note in e.scorecard.notes:
         lines.append(f"  - {note}")
     lines.append("")
@@ -186,6 +186,7 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
                  f"({ms.selected.total_impulse_n_s:.0f} Ns, class {ms.selected.impulse_class.value})")
     lines.append(f"- **Predicted apogee:** {ms.selected.predicted_apogee_m:.0f} m "
                  f"({ms.selected.apogee_error_pct:+.2f}% from target)")
+    lines.append(f"- **Configured impulse eligibility:** {'PASS' if ms.selected.passes_certification else 'FAIL'}")
     lines.append(f"- **Predicted Max-Q:** {ms.selected.predicted_max_q_pa/1000:.1f} kPa | "
                  f"**Max Mach:** {ms.selected.predicted_max_mach:.2f}\n")
     lines.append("**Motor trade study (shortlist):**\n")
@@ -234,16 +235,21 @@ def render_markdown(report: FlightReadinessReport, all_stability_results, plot_p
     lines.append(f"- **Predicted drift:** {rc.recommended.predicted_drift_m:.0f} m | "
                  f"**Impact velocity:** {rc.recommended.predicted_impact_velocity_m_s:.2f} m/s "
                  f"(limit {rc.max_safe_impact_velocity_m_s:.1f} m/s)")
-    lines.append(f"- **Footprint reduction vs. baseline config:** {rc.footprint_reduction_pct:.1f}%")
+    lines.append(f"- **Nominal single-flight drift reduction:** {rc.footprint_reduction_pct:.1f}%")
+    if rc.confirmed_footprint_reduction_pct is not None:
+        lines.append(f"- **Confirmed Monte Carlo ellipse semi-major-axis reduction:** "
+                     f"{rc.confirmed_footprint_reduction_pct:.1f}%")
     lines.append(f"- **Pareto-optimal candidates:** {len(rc.pareto_front)} of {len(rc.candidates)} evaluated")
     lines.append(f"\n![Recovery drift vs impact-velocity trade-off]({plot_paths['recovery'].name})\n")
 
     if v:
         lines.append("## 6. Flight-Data Comparison & Validation Evidence (Stage 5)\n")
         if v.is_physical_validation:
-            lines.append("- **Evidence class:** NON-SYNTHETIC FLIGHT DATA (source supplied by operator; not independently authenticated)")
-        else:
+            lines.append("- **Evidence class:** NON-SYNTHETIC FLIGHT DATA; operator attests configuration match (not independently authenticated)")
+        elif v.actual.is_synthetic:
             lines.append("- **Evidence class:** SYNTHETIC DEMONSTRATION — NOT PHYSICAL VALIDATION")
+        else:
+            lines.append("- **Evidence class:** NON-SYNTHETIC DATA, BUT CONFIGURATION MATCH IS NOT ATTESTED — NOT ACCEPTED AS VALIDATION EVIDENCE")
         lines.append(f"- **Source:** {v.actual.source}")
         lines.append(f"- **Apogee error:** {v.apogee_error_pct:+.2f}%  "
                      f"(sim {v.simulated.apogee_m:.0f} m vs actual {v.actual.apogee_m:.0f} m)")
