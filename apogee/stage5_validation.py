@@ -13,8 +13,9 @@ flight time — the fields every commercial altimeter, e.g. a PerfectFlite
 or Eggtimer, logs by default) and compares it against what RocketPy
 predicted for the *same* nominal conditions, producing a signed
 percentage error per metric plus a plain-language explanation of likely
-error sources — not just a number, but the engineering reasoning behind
-it, the way a real post-flight report would.
+error sources. A non-synthetic log only counts as physical-validation
+evidence when the operator attests that its vehicle configuration matches
+the simulated configuration; this attestation is not independently verified.
 
 No hardware flight was flown for this repo (it's a software deliverable),
 so ``data/sample_flight_log.csv`` is a clearly-labeled SYNTHETIC demo log
