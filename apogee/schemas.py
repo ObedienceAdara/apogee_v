@@ -155,7 +155,7 @@ class DispersionRunResult(BaseModel):
     landing_y_m: float
     time_to_apogee_s: float
     flight_time_s: float
-    converged: bool
+    completed: bool
     failure_reason: Optional[str] = None
 
 
@@ -170,8 +170,8 @@ class DispersionEllipse(BaseModel):
 
 class DispersionAnalysisResult(BaseModel):
     n_runs: int
-    n_converged: int
-    convergence_rate_pct: float
+    n_completed: int
+    successful_run_rate_pct: float
     failure_reasons: list[str] = Field(default_factory=list)
     runs: list[DispersionRunResult]
     landing_ellipse_95: DispersionEllipse
@@ -246,7 +246,7 @@ class MissionConfig(BaseModel):
     airframe: AirframeSpec
     motor_library_dir: str
     n_dispersion_runs: int = 200
-    minimum_monte_carlo_convergence_pct: float = Field(default=95.0, gt=0, le=100)
+    minimum_monte_carlo_success_rate_pct: float = Field(default=95.0, gt=0, le=100)
     max_safe_impact_velocity_m_s: float = 7.0
     stability_safety_threshold_cal: float = 1.0
     flight_log_csv: Optional[str] = None
