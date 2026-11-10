@@ -41,6 +41,7 @@ from apogee.stage4_stability import sweep_fin_geometry
 from apogee.stage5_validation import load_flight_log, run_stage5
 from apogee.utils.motor_parser import parse_eng_file
 from apogee.utils.rocket_builder import build_motor_from_curve
+from apogee.readiness import evaluate_readiness_gates
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger("apogee.pipeline")
@@ -62,7 +63,7 @@ FIN_CANDIDATES = [
 ]
 
 
-def load_mission_config(path: str | Path) -> MissionConfig:
+def load_mission_config(path: str | Path) -> tuple[MissionConfig, float, float]:
     with open(path) as f:
         raw = yaml.safe_load(f)
     return MissionConfig(
@@ -74,17 +75,17 @@ def load_mission_config(path: str | Path) -> MissionConfig:
         airframe=AirframeSpec(**raw["airframe"]),
         motor_library_dir=raw["motor_library_dir"],
         n_dispersion_runs=raw.get("n_dispersion_runs", 200),
+        minimum_monte_carlo_convergence_pct=raw.get("minimum_monte_carlo_convergence_pct", 95.0),
         max_safe_impact_velocity_m_s=raw.get("max_safe_impact_velocity_m_s", 7.0),
         stability_safety_threshold_cal=raw.get("stability_safety_threshold_cal", 1.0),
         flight_log_csv=raw.get("flight_log_csv"),
+        flight_log_is_synthetic=raw.get("flight_log_is_synthetic", False),
     ), raw.get("surface_wind_m_s", 4.5), raw.get("surface_wind_heading_deg", 270.0)
 
 
 def run_pipeline(config_path: str | Path, quick: bool = False,
                   max_workers: int | None = None) -> tuple[FlightReadinessReport, list]:
     mission, surface_wind, surface_heading = load_mission_config(config_path)
-    blocking_issues: list[str] = []
-
     # ---------------------------------------------------------------- #
     log.info("STAGE 0 — Environment & launch window (Astropy + RocketPy)")
     launch_dt = mission.launch_datetime_utc
@@ -94,9 +95,6 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     log.info("  sun_elevation=%.1fdeg  max_wind=%.1fm/s  GO=%s",
               env_report.scorecard.sun_elevation_deg, env_report.scorecard.max_wind_speed_m_s,
               env_report.scorecard.overall_go)
-    if not env_report.scorecard.overall_go:
-        blocking_issues.append("Stage 0: environment scorecard is NO-GO (wind exceeds safety limit).")
-
     # ---------------------------------------------------------------- #
     log.info("STAGE 1 — Motor selection optimizer")
     motor_selection = run_stage1(
@@ -106,12 +104,6 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     sel = motor_selection.selected
     log.info("  selected=%s  apogee=%.1fm (target %.1fm, err %.2f%%)",
               sel.motor_id, sel.predicted_apogee_m, mission.target_apogee_m, sel.apogee_error_pct)
-    if abs(sel.apogee_error_pct) > mission.apogee_tolerance_pct:
-        blocking_issues.append(
-            f"Stage 1: no motor in the library hits {mission.target_apogee_m:.0f}m within "
-            f"{mission.apogee_tolerance_pct:.1f}% — closest is {sel.motor_id} at {sel.apogee_error_pct:+.2f}%."
-        )
-
     # ---------------------------------------------------------------- #
     log.info("STAGE 4 — Stability margin sweep vs Mach (fin geometry)")
     curve = parse_eng_file(sel.thrust_curve_file)
@@ -122,12 +114,6 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     log.info("  selected fin=%s  min_margin=%.2fcal @ M%.2f  stable=%s",
               selected_stability.fin.fin_id, selected_stability.min_margin_cal,
               selected_stability.min_margin_mach, selected_stability.is_stable)
-    if not selected_stability.is_stable:
-        blocking_issues.append(
-            f"Stage 4: no fin candidate keeps static margin above "
-            f"{mission.stability_safety_threshold_cal:.1f} cal through the whole flight."
-        )
-
     fin = selected_stability.fin
     n_dispersion = 20 if quick else mission.n_dispersion_runs
 
@@ -143,8 +129,10 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
         max_workers=max_workers,
     )
     baseline_footprint = baseline_dispersion.landing_ellipse_95.semi_major_m
-    log.info("  baseline 95%% ellipse semi-major=%.1fm  apogee=%.1f+/-%.1fm",
-              baseline_footprint, baseline_dispersion.apogee_mean_m, baseline_dispersion.apogee_std_m)
+    log.info("  baseline 95%% ellipse semi-major=%.1fm  apogee=%.1f+/-%.1fm  convergence=%.1f%% (%d/%d)",
+              baseline_footprint, baseline_dispersion.apogee_mean_m, baseline_dispersion.apogee_std_m,
+              baseline_dispersion.convergence_rate_pct, baseline_dispersion.n_converged,
+              baseline_dispersion.n_runs)
 
     # ---------------------------------------------------------------- #
     log.info("STAGE 3 — Recovery system timing optimizer (Pareto trade study)")
@@ -171,33 +159,57 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     )
     confirmed_footprint = confirmed_dispersion.landing_ellipse_95.semi_major_m
     actual_reduction = 100.0 * (baseline_footprint - confirmed_footprint) / baseline_footprint if baseline_footprint else 0.0
-    log.info("  confirmed 95%% ellipse semi-major=%.1fm  (%.1f%% change vs baseline)",
-              confirmed_footprint, actual_reduction)
+    log.info("  confirmed 95%% ellipse semi-major=%.1fm  (%.1f%% change vs baseline)  convergence=%.1f%% (%d/%d)",
+              confirmed_footprint, actual_reduction, confirmed_dispersion.convergence_rate_pct,
+              confirmed_dispersion.n_converged, confirmed_dispersion.n_runs)
 
     # ---------------------------------------------------------------- #
     validation = None
     if mission.flight_log_csv and Path(mission.flight_log_csv).exists():
         log.info("STAGE 5 — Real flight validation")
-        actual = load_flight_log(mission.flight_log_csv)
-        nominal_run = confirmed_dispersion.runs[0]
+        actual = load_flight_log(
+            mission.flight_log_csv,
+            force_synthetic=mission.flight_log_is_synthetic,
+        )
         from apogee.schemas import FlightLogRecord
-        SPEED_OF_SOUND_LOW_ALT_M_S = 340.0  # max-Mach point occurs early/low-altitude for this airframe
+        # Use the same completed Monte Carlo result set for the simulated
+        # reference metrics; do not infer velocity from Mach using a fixed
+        # speed-of-sound constant.
         simulated = FlightLogRecord(
-            source="rocketpy_nominal",
+            source="rocketpy_confirmed_monte_carlo_mean",
             apogee_m=confirmed_dispersion.apogee_mean_m,
-            max_velocity_m_s=round(nominal_run.max_mach * SPEED_OF_SOUND_LOW_ALT_M_S, 2),
+            max_velocity_m_s=confirmed_dispersion.max_velocity_mean_m_s,
             descent_rate_m_s=recovery.recommended.predicted_impact_velocity_m_s,
-            flight_time_s=nominal_run.flight_time_s,
+            flight_time_s=sum(r.flight_time_s for r in confirmed_dispersion.runs if r.converged)
+            / confirmed_dispersion.n_converged,
         )
         validation = run_stage5(simulated, actual)
-        log.info("  apogee_error=%.2f%%  velocity_error=%.2f%%  descent_error=%.2f%%  within_tolerance=%s",
+        log.info("  source=%s physical=%s  apogee_error=%.2f%%  velocity_error=%.2f%%  descent_error=%.2f%%  within_tolerance=%s",
+                  actual.source, validation.is_physical_validation,
                   validation.apogee_error_pct, validation.velocity_error_pct,
                   validation.descent_rate_error_pct, validation.within_acceptable_error)
     else:
         log.info("STAGE 5 — skipped (no flight_log_csv configured/found)")
 
     # ---------------------------------------------------------------- #
-    overall_go = env_report.scorecard.overall_go and selected_stability.is_stable and not blocking_issues
+    blocking_issues = evaluate_readiness_gates(
+        launch_datetime_is_future=launch_dt > datetime.now(timezone.utc),
+        environment_passed=env_report.scorecard.overall_go,
+        motor_within_impulse_limit=bool(sel.passes_certification),
+        motor_within_apogee_tolerance=(
+            abs(sel.apogee_error_pct) <= mission.apogee_tolerance_pct
+        ),
+        stability_passed=selected_stability.is_stable,
+        baseline_convergence_pct=baseline_dispersion.convergence_rate_pct,
+        confirmation_convergence_pct=confirmed_dispersion.convergence_rate_pct,
+        minimum_convergence_pct=mission.minimum_monte_carlo_convergence_pct,
+        recovery_has_safe_candidate=recovery.has_safe_candidate,
+        recovery_recommended_is_safe=recovery.recommended_is_safe,
+        validation_is_physical=bool(validation and validation.is_physical_validation),
+        validation_within_tolerance=(
+            validation.within_acceptable_error if validation else None
+        ),
+    )
 
     report = FlightReadinessReport(
         mission=mission,
@@ -208,7 +220,8 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
         recovery=recovery,
         validation=validation,
         generated_at_utc=datetime.now(timezone.utc),
-        overall_go_for_launch=overall_go,
+        engineering_gates_passed=not blocking_issues,
+        launch_authorization_status="NOT_AUTHORIZED",
         blocking_issues=blocking_issues,
     )
     return report, all_stability
