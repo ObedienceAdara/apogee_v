@@ -131,7 +131,7 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
         max_workers=max_workers,
     )
     baseline_footprint = baseline_dispersion.landing_ellipse_95.semi_major_m
-    log.info("  baseline 95%% ellipse semi-major=%.1fm  apogee=%.1f+/-%.1fm  convergence=%.1f%% (%d/%d)",
+    log.info("  baseline 95%% ellipse semi-major=%.1fm  apogee=%.1f+/-%.1fm  successful-run rate=%.1f%% (%d/%d)",
               baseline_footprint, baseline_dispersion.apogee_mean_m, baseline_dispersion.apogee_std_m,
               baseline_dispersion.successful_run_rate_pct, baseline_dispersion.n_completed,
               baseline_dispersion.n_runs)
@@ -161,7 +161,7 @@ def run_pipeline(config_path: str | Path, quick: bool = False,
     )
     confirmed_footprint = confirmed_dispersion.landing_ellipse_95.semi_major_m
     actual_reduction = 100.0 * (baseline_footprint - confirmed_footprint) / baseline_footprint if baseline_footprint else 0.0
-    log.info("  confirmed 95%% ellipse semi-major=%.1fm  (%.1f%% change vs baseline)  convergence=%.1f%% (%d/%d)",
+    log.info("  confirmed 95%% ellipse semi-major=%.1fm  (%.1f%% change vs baseline)  successful-run rate=%.1f%% (%d/%d)",
               confirmed_footprint, actual_reduction, confirmed_dispersion.successful_run_rate_pct,
               confirmed_dispersion.n_completed, confirmed_dispersion.n_runs)
     recovery = recovery.model_copy(
